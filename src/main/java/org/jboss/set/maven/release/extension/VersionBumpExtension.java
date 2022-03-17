@@ -172,80 +172,96 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
      * @param versionConsumer
      */
     private void resolveDependencyVersionUpdate(final Dependency dependency,final Consumer<String> versionConsumer) {
-        //TODO: discriminate major/minor/micro here?
-        final List<MetadataResult> metaDataResults = fetchDependencyMetadata(dependency);
-        if(metaDataResults.size() == 0) {
-            logger.info("[VBE] {}:{}, failed to fetch metadata for dependency {}:{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
-            return;
-        }
-        final List<MetadataResult> results = fetchDependencyMetadata(dependency);
-        if(results == null || results.size() == 0) {
-            logger.info("[VBE] {}:{}, no possible update for dependency {}:{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
-            return;
-        }
+        try {
+            // TODO: discriminate major/minor/micro here?
+            final List<MetadataResult> metaDataResults = fetchDependencyMetadata(dependency);
+            if (metaDataResults.size() == 0) {
+                logger.info("[VBE] {}:{}, failed to fetch metadata for dependency {}:{}",
+                        session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
+                        dependency.getGroupId(), dependency.getArtifactId());
+                return;
+            }
+            final List<MetadataResult> results = fetchDependencyMetadata(dependency);
+            if (results == null || results.size() == 0) {
+                logger.info("[VBE] {}:{}, no possible update for dependency {}:{}", session.getCurrentProject().getGroupId(),
+                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
+                return;
+            }
 
-        //remove deps that are not good, sort, pick one. 
-        final List<Metadata> intermediate = results.stream().filter(m -> m!=null && !m.isMissing() && m.isResolved()).map(s -> s.getMetadata()).collect(Collectors.toList());
-        //TODO: check on release/latest: technically its possible to release previous major/minor?
-        //This is shady and bad, but will do for now...
-//        final List<Versioning> metadataVersioning = new ArrayList<>();
-//
-//        for (Metadata result : intermediate) {
-//            try (FileReader reader = new FileReader(result.getFile())) {
-//                final org.apache.maven.artifact.repository.metadata.Metadata md = new MetadataXpp3Reader().read(reader);
-//                final Versioning v = md.getVersioning();
-//                if (v != null) {
-//                    // yyyymmddHHMMSS --> v.getLastUpdated()
-//                    metadataVersioning.add(v);
-//                }
-//            } catch (IOException | XmlPullParserException e) {
-//                logger.info("[VBE] {}:{}, failed to parse metadata {}:{}. {} {}",
-//                        session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
-//                        dependency.getGroupId(), dependency.getArtifactId(), result.getFile(), e.getMessage(), e);
-//            }
-//        }
-//        Set<String> versions = new TreeSet<>(InsaneVersionComparator.INSTANCE.reversed());
-//        for(Versioning v:metadataVersioning) {
-//            for(String version:v.getVersions()) {
-//                versions.add(version);
-//            }
-//        }
-//        //first one should be most senior.
-//        final String possibleUpdate = versions.iterator().next();
-//        //NOTE: just as an exercise: this achieves the same as above, going to leave above for now just in case its not easy to mess with Channel API and below streams
-        Optional<String> optionalVersion = intermediate.stream().map(m -> {
-            try (FileReader reader = new FileReader(m.getFile())) {
-                final org.apache.maven.artifact.repository.metadata.Metadata md = new MetadataXpp3Reader().read(reader);
-                final Versioning v = md.getVersioning();
-                if (v != null) {
-                    // yyyymmddHHMMSS --> v.getLastUpdated()
-                    return v;
+            // remove deps that are not good, sort, pick one.
+            final List<Metadata> intermediate = results.stream().filter(m -> m != null && !m.isMissing() && m.isResolved())
+                    .map(s -> s.getMetadata()).collect(Collectors.toList());
+            // TODO: check on release/latest: technically its possible to release previous major/minor?
+            // This is shady and bad, but will do for now...
+//          final List<Versioning> metadataVersioning = new ArrayList<>();
+            //
+//                    for (Metadata result : intermediate) {
+//                        try (FileReader reader = new FileReader(result.getFile())) {
+//                            final org.apache.maven.artifact.repository.metadata.Metadata md = new MetadataXpp3Reader().read(reader);
+//                            final Versioning v = md.getVersioning();
+//                            if (v != null) {
+//                                // yyyymmddHHMMSS --> v.getLastUpdated()
+//                                metadataVersioning.add(v);
+//                            }
+//                        } catch (IOException | XmlPullParserException e) {
+//                            logger.info("[VBE] {}:{}, failed to parse metadata {}:{}. {} {}",
+//                                    session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
+//                                    dependency.getGroupId(), dependency.getArtifactId(), result.getFile(), e.getMessage(), e);
+//                        }
+//                    }
+//                    Set<String> versions = new TreeSet<>(InsaneVersionComparator.INSTANCE.reversed());
+//                    for(Versioning v:metadataVersioning) {
+//                        for(String version:v.getVersions()) {
+//                            versions.add(version);
+//                        }
+//                    }
+//                    //first one should be most senior.
+            // final String possibleUpdate = versions.iterator().next();
+            // //NOTE: just as an exercise: this achieves the same as above, going to leave above for now just in case its not
+            // easy to mess with Channel API and below streams
+            Optional<String> optionalVersion = intermediate.stream().map(m -> {
+                try (FileReader reader = new FileReader(m.getFile())) {
+                    final org.apache.maven.artifact.repository.metadata.Metadata md = new MetadataXpp3Reader().read(reader);
+                    final Versioning v = md.getVersioning();
+                    if (v != null) {
+                        // yyyymmddHHMMSS --> v.getLastUpdated()
+                        return v;
+                    }
+                } catch (IOException | XmlPullParserException e) {
+                    logger.info("[VBE] {}:{}, failed to parse metadata {}:{}. {} {}", session.getCurrentProject().getGroupId(),
+                            session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(),
+                            m.getFile(), e.getMessage(), e);
+
                 }
-            } catch (IOException | XmlPullParserException e) {
-                logger.info("[VBE] {}:{}, failed to parse metadata {}:{}. {} {}", session.getCurrentProject().getGroupId(),
-                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), m.getFile(),
-                        e.getMessage(), e);
-        
-            }
-            return null;
-        }).filter(Objects::nonNull).map(v -> {
-            return v.getVersions();
-        }).flatMap(Collection::stream).collect(Collectors.maxBy(InsaneVersionComparator.INSTANCE));
+                return null;
+            }).filter(Objects::nonNull).map(v -> {
+                return v.getVersions();
+            }).flatMap(Collection::stream).collect(Collectors.maxBy(InsaneVersionComparator.INSTANCE));
 
-        final String possibleUpdate = optionalVersion.get();
-        //first should be most senior one.
-        if(possibleUpdate!=null) {
-            if(InsaneVersionComparator.INSTANCE.compare(possibleUpdate, dependency.getVersion()) > 0) {
-                //This should not happen, though...?
-                logger.info("[VBE] {}:{}, possible update for dependency {}:{} {}->{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(),possibleUpdate);
-                versionConsumer.accept(possibleUpdate);
-                return;
+            final String possibleUpdate = optionalVersion.get();
+            // first should be most senior one.
+            if (possibleUpdate != null) {
+                if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate, dependency.getVersion()) > 0) {
+                    // This should not happen, though...?
+                    logger.info("[VBE] {}:{}, possible update for dependency {}:{} {}->{}",
+                            session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
+                            dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(), possibleUpdate);
+                    versionConsumer.accept(possibleUpdate);
+                    return;
+                } else {
+                    logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
+                            session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
+                            dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(), possibleUpdate);
+                    return;
+                }
             } else {
-                logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(),possibleUpdate);
+                logger.info("[VBE] {}:{}, no possible update for dependency {}:{}", session.getCurrentProject().getGroupId(),
+                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
                 return;
             }
-        } else {
-            logger.info("[VBE] {}:{}, no possible update for dependency {}:{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
+        } catch (Exception e) {
+            logger.info("[VBE] {}:{}, failed to fetch info for {}:{} -> {}", session.getCurrentProject().getGroupId(),
+                    session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), e);
             return;
         }
     }
