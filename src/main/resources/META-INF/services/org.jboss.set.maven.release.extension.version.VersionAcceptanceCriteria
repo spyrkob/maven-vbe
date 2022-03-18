@@ -1,0 +1,2 @@
+org.jboss.set.maven.release.extension.version.RedhatVersionAcceptor
+org.jboss.set.maven.release.extension.version.PatternVersionAcceptor

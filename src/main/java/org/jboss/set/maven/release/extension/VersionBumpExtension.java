@@ -6,11 +6,13 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -44,6 +46,8 @@ import org.eclipse.aether.resolution.ArtifactResult;
 import org.eclipse.aether.resolution.MetadataRequest;
 import org.eclipse.aether.resolution.MetadataResult;
 import org.jboss.set.maven.release.extension.version.InsaneVersionComparator;
+import org.jboss.set.maven.release.extension.version.RedhatVersionAcceptor;
+import org.jboss.set.maven.release.extension.version.VersionAcceptanceCriteria;
 import org.slf4j.Logger;
 
 @Component(role = AbstractMavenLifecycleParticipant.class, hint = "mailman")
@@ -64,6 +68,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     //yeah, not a best practice
     private MavenSession session;
     private List<RemoteRepository> repositories;
+    private VersionAcceptanceCriteria versionTester = new RedhatVersionAcceptor();
     @Override
     public void afterSessionStart(MavenSession session) throws MavenExecutionException {
         super.afterSessionStart(session);
@@ -71,34 +76,34 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     }
 
     @Override
-    public void afterProjectsRead(MavenSession session) throws MavenExecutionException {
+    public void afterProjectsRead(final MavenSession session) throws MavenExecutionException {
+        logger.info("\n\n========== Red Hat Channel Version Extension[VBE] Starting ==========\n");
         //NOTE: this will work only for project defined deps, if something is in parent, it ~cant be changed.
         if (session == null) {
             return;
         }
+
         this.session = session;
         long ts = System.currentTimeMillis();
         configureProperties(session);
 
-        if (shouldSkip(session)) {
-            return;
-        }
-        
-        logger.info("\n\n========== Red Hat Channel Version Extension[VBE] Starting ==========\n");
-        //NOTE: iterate over artifacts/deps and find most recent version available in repos
-        //TODO: inject channels into this, as now it will just consume whole repo, its fine as long as it is sanitazed
-        this.repositories = configureRepositories(session);
+        if (!shouldSkip(session)) {
+          //NOTE: iterate over artifacts/deps and find most recent version available in repos
+            //TODO: inject channels into this, as now it will just consume whole repo, its fine as long as it is sanitazed
+            configure(session);
 
-        for(MavenProject mavenProject:session.getAllProjects()) {
-            //TODO: debug and check if this will cover dep/parent projects
-            //TODO: determine if we need to update every project?
-            logger.info("[PROCESSING]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
-            if (mavenProject.getDependencyManagement() != null) {
-                processProject(mavenProject);
-            }
-            
-            logger.info("[FINISHED]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
+            for(MavenProject mavenProject:session.getAllProjects()) {
+                //TODO: debug and check if this will cover dep/parent projects
+                //TODO: determine if we need to update every project?
+                logger.info("[PROCESSING]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
+                if (mavenProject.getDependencyManagement() != null) {
+                    processProject(mavenProject);
+                }
+
+                logger.info("[FINISHED]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
+            }    
         }
+
         logger.info("\n\n========== Red Hat Channel Version Extension Finished in " + (System.currentTimeMillis() - ts) + "ms ==========\n");
     }
 
@@ -111,14 +116,14 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                     mavenProject.getManagedVersionMap().get(dependency.getManagementKey()).setResolvedVersion(a.getVersion());
                     mavenProject.getManagedVersionMap().get(dependency.getManagementKey()).setVersion(a.getVersion());
                     dependency.setVersion(a.getVersion());
-                });
+                }, versionTester);
             }
         }
 
         for (Dependency dependency : mavenProject.getDependencies()) {
             updateDependency(mavenProject, dependency, false, (org.eclipse.aether.artifact.Artifact a) -> {
                 dependency.setVersion(a.getVersion());
-            });
+            }, versionTester);
         }
     }
 
@@ -130,7 +135,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
      * @param mavenProjectVersionUpdater - artifact consumer which will perform maven model/pojo updates
      */
     private void updateDependency(final MavenProject mavenProject, final Dependency dependency, final boolean managed,
-            final Consumer<org.eclipse.aether.artifact.Artifact> mavenProjectVersionUpdater) {
+            final Consumer<org.eclipse.aether.artifact.Artifact> mavenProjectVersionUpdater, final VersionAcceptanceCriteria tester) {
         if (!shouldProcess(dependency)) {
             logger.info("[VBE] {}:{}, skipping dependency{} {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId(),
                     managed?"(M)":"",dependency.getGroupId(), dependency.getArtifactId());
@@ -161,7 +166,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                         mavenProject.getArtifactId(), managed?"(M)":"", dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(),
                         nextVersion);
                 mavenProjectVersionUpdater.accept(result.getArtifact());
-            });
+            },tester);
             
         }
     }
@@ -171,7 +176,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
      * @param dependency
      * @param versionConsumer
      */
-    private void resolveDependencyVersionUpdate(final Dependency dependency,final Consumer<String> versionConsumer) {
+    private void resolveDependencyVersionUpdate(final Dependency dependency,final Consumer<String> versionConsumer, final VersionAcceptanceCriteria tester) {
         try {
             // TODO: discriminate major/minor/micro here?
             final List<MetadataResult> metaDataResults = fetchDependencyMetadata(dependency);
@@ -236,8 +241,15 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 return null;
             }).filter(Objects::nonNull).map(v -> {
                 return v.getVersions();
-            }).flatMap(Collection::stream).collect(Collectors.maxBy(InsaneVersionComparator.INSTANCE));
+            }).flatMap(Collection::stream)
+              .filter(s-> {return tester.accept(s);})
+              .collect(Collectors.maxBy(InsaneVersionComparator.INSTANCE));
 
+            if(!optionalVersion.isPresent()) {
+                logger.info("[VBE] {}:{}, no suitable update {}:{}", session.getCurrentProject().getGroupId(),
+                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
+                return;
+            }
             final String possibleUpdate = optionalVersion.get();
             // first should be most senior one.
             if (possibleUpdate != null) {
@@ -260,7 +272,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 return;
             }
         } catch (Exception e) {
-            logger.info("[VBE] {}:{}, failed to fetch info for {}:{} -> {}", session.getCurrentProject().getGroupId(),
+            logger.error("[VBE] {}:{}, failed to fetch info for {}:{} -> {}", session.getCurrentProject().getGroupId(),
                     session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), e);
             return;
         }
@@ -308,6 +320,36 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         }
 
         return skip != null && skip;
+    }
+
+    private void configure(final MavenSession session) throws MavenExecutionException {
+        this.repositories = configureRepositories(session);
+        final ServiceLoader<VersionAcceptanceCriteria> versionAcceptanceServices = ServiceLoader.load(VersionAcceptanceCriteria.class);
+        final Iterator<VersionAcceptanceCriteria> it = versionAcceptanceServices.iterator();
+        if(it.hasNext()) {
+            final String property = System.getProperty(VersionAcceptanceCriteria.VBE_VERSION_ACCEPTOR_PROPERTY);
+            if(property != null && property.length() > 0) {
+                while(it.hasNext()) {
+                    final VersionAcceptanceCriteria tmp = it.next();
+                    final String className = tmp.getClass().getName(); 
+                    if(className.endsWith(property) || className.equals(property)) {
+                        this.versionTester = tmp;
+                        break;
+                    }
+                }
+
+                if(this.versionTester == null) {
+                    logger.warn("[VBE] {}:{}, no version acceptor, defualting to 'RedhatVersionAcceptor'", session.getCurrentProject().getGroupId());
+                    this.versionTester = new RedhatVersionAcceptor();
+                }
+            } else {
+                //first is RHT
+                this.versionTester = it.next();
+            }
+        } else {
+            logger.warn("[VBE] {}:{}, no version acceptor, defualting to 'RedhatVersionAcceptor'", session.getCurrentProject().getGroupId());
+            this.versionTester = new RedhatVersionAcceptor();
+        }
     }
 
     private void configureProperties(MavenSession session) throws MavenExecutionException {
