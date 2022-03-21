@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +53,8 @@ import org.slf4j.Logger;
 
 @Component(role = AbstractMavenLifecycleParticipant.class, hint = "mailman")
 public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
-
+    //comma separated list of repo names, as defined in pom( I think )
+    String VBE_REPOSITORY_NAMES = "vbe.repository.names";
     @Requirement
     private Logger logger;
 
@@ -242,7 +244,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             }).filter(Objects::nonNull).map(v -> {
                 return v.getVersions();
             }).flatMap(Collection::stream)
-              .filter(s-> {return tester.accept(s);})
+              .filter(s-> {return tester.accept(dependency.getVersion(), s);})
               .collect(Collectors.maxBy(InsaneVersionComparator.INSTANCE));
 
             if(!optionalVersion.isPresent()) {
@@ -367,18 +369,31 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     }
 
     private List<RemoteRepository> configureRepositories(MavenSession session) throws MavenExecutionException {
-        List<RemoteRepository> repositories = new ArrayList<>();
-        if (repositories.size() == 0) {
-            for (org.apache.maven.model.Repository repo : session.getCurrentProject().getRepositories()) {
-                String id = repo.getId() == null ? UUID.randomUUID().toString() : repo.getId();
-                RemoteRepository.Builder builder = new RemoteRepository.Builder(id, repo.getLayout(), repo.getUrl());
+        final String repositoryNames = System.getProperty(VBE_REPOSITORY_NAMES);
+        final Set<String> names = new HashSet<>();
+        logger.info("[VBE] Repository names used in updates:");
+        if(repositoryNames !=null && repositoryNames.length() > 0) {
+            for(String s:repositoryNames.split(",")) {
+                logger.info("  - {}",s);
+                names.add(s.strip());
+            }
+        }
+        
+        final List<RemoteRepository> repositories = new ArrayList<>();
+
+        logger.info("[VBE] Repository present in reactor:");
+        for (org.apache.maven.model.Repository repo : session.getCurrentProject().getRepositories()) {
+            final String id = repo.getId() == null ? UUID.randomUUID().toString() : repo.getId();
+            logger.info("  - {}: {}", id, repo.getUrl());
+            if(names.size() > 0 && names.contains(id)) {
+                final RemoteRepository.Builder builder = new RemoteRepository.Builder(id, repo.getLayout(), repo.getUrl());
                 repositories.add(builder.build());
             }
-            logger.info("[VBE]Reading metadata and artifacts from {} project {}", repositories.size(),
-                    repositories.size() > 1 ? "repositories" : "repository");
-            for (RemoteRepository r : repositories) {
-                logger.info("  - {}: {}", r.getId(), r.getUrl());
-            }
+        }
+        logger.info("[VBE] Reading metadata and artifacts from {} project {}", repositories.size(),
+                repositories.size() > 1 ? "repositories" : "repository:");
+        for (RemoteRepository r : repositories) {
+            logger.info("  - {}: {}", r.getId(), r.getUrl());
         }
 
         return repositories;

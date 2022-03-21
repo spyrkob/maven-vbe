@@ -17,7 +17,7 @@ public class PatternVersionAcceptor implements VersionAcceptanceCriteria {
     }
 
     @Override
-    public boolean accept(String v) {
-        return pattern != null && v != null && pattern.matcher(v).find();
+    public boolean accept(final String current,final String proposed) {
+        return pattern != null && proposed != null && pattern.matcher(proposed).find();
     }
 }
