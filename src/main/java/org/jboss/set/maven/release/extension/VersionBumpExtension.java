@@ -385,7 +385,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         for (org.apache.maven.model.Repository repo : session.getCurrentProject().getRepositories()) {
             final String id = repo.getId() == null ? UUID.randomUUID().toString() : repo.getId();
             logger.info("  - {}: {}", id, repo.getUrl());
-            if(names.size() > 0 && names.contains(id)) {
+            if (names.size() == 0 || names.contains(id)) {
                 final RemoteRepository.Builder builder = new RemoteRepository.Builder(id, repo.getLayout(), repo.getUrl());
                 repositories.add(builder.build());
             }
