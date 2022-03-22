@@ -371,7 +371,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     private List<RemoteRepository> configureRepositories(MavenSession session) throws MavenExecutionException {
         final String repositoryNames = System.getProperty(VBE_REPOSITORY_NAMES);
         final Set<String> names = new HashSet<>();
-        logger.info("[VBE] Repository names used in updates:");
+        logger.info("[VBE] Repository names used for updates:");
         if(repositoryNames !=null && repositoryNames.length() > 0) {
             for(String s:repositoryNames.split(",")) {
                 logger.info("  - {}",s);
