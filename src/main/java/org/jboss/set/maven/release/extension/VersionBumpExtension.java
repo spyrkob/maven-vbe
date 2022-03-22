@@ -375,7 +375,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         if(repositoryNames !=null && repositoryNames.length() > 0) {
             for(String s:repositoryNames.split(",")) {
                 logger.info("  - {}",s);
-                names.add(s.strip());
+                names.add(s.trim());
             }
         }
         
