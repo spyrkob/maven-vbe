@@ -48,6 +48,8 @@ import org.eclipse.aether.resolution.MetadataRequest;
 import org.eclipse.aether.resolution.MetadataResult;
 import org.jboss.set.maven.release.extension.version.InsaneVersionComparator;
 import org.jboss.set.maven.release.extension.version.RedhatVersionAcceptor;
+import org.jboss.set.maven.release.extension.version.VBEVersion;
+import org.jboss.set.maven.release.extension.version.VBEVersionComparator;
 import org.jboss.set.maven.release.extension.version.VersionAcceptanceCriteria;
 import org.slf4j.Logger;
 
@@ -71,6 +73,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     private MavenSession session;
     private List<RemoteRepository> repositories;
     private VersionAcceptanceCriteria versionTester = new RedhatVersionAcceptor();
+    private Map<String,ProjectReportEntry> reportMaterial = new TreeMap<>(Comparator.comparing(String::toString));
     @Override
     public void afterSessionStart(MavenSession session) throws MavenExecutionException {
         super.afterSessionStart(session);
@@ -94,23 +97,31 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             //TODO: inject channels into this, as now it will just consume whole repo, its fine as long as it is sanitazed
             configure(session);
 
+            //NOTE: to handle ALL modules. Those are different "projects"
             for(MavenProject mavenProject:session.getAllProjects()) {
                 //TODO: debug and check if this will cover dep/parent projects
                 //TODO: determine if we need to update every project?
-                logger.info("[PROCESSING]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
+                logger.info("[VBE][PROCESSING]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
                 if (mavenProject.getDependencyManagement() != null) {
                     processProject(mavenProject);
                 }
 
-                logger.info("[FINISHED]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
-            }    
+                logger.info("[VBE][FINISHED]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
+            }
+            report();
         }
 
         logger.info("\n\n========== Red Hat Channel Version Extension Finished in " + (System.currentTimeMillis() - ts) + "ms ==========\n");
     }
 
+    private void report() {
+        logger.info("[VBE][REPORT] Artifact report for main project {}:{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId());
+        this.reportMaterial.values().stream().forEach(v->{v.report(logger);});
+    }
+
     private void processProject(final MavenProject mavenProject) {
         // NOTE: two step, project has deps and dep management, both need to be tuned.
+        // not ideal, because it will resolve artifacts twice
         if (mavenProject.getDependencyManagement() != null) {
             final DependencyManagement dependencyManagement = mavenProject.getDependencyManagement();
             for (Dependency dependency : dependencyManagement.getDependencies()) {
@@ -144,12 +155,12 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         } else {
             resolveDependencyVersionUpdate(dependency, nextVersion ->{
                 // fetch artifact
-                if (nextVersion == null || nextVersion.equals(dependency.getVersion())) {
+                if (nextVersion == null || nextVersion.getVersion().equals(dependency.getVersion())) {
                     return;
                 }
                 ArtifactRequest request = new ArtifactRequest();
                 DefaultArtifact requestedArtifact = new DefaultArtifact(String.format("%s:%s:%s:%s", dependency.getGroupId(),
-                        dependency.getArtifactId(), dependency.getType(), nextVersion));
+                        dependency.getArtifactId(), dependency.getType(), nextVersion.getVersion()));
                 request.setArtifact(requestedArtifact);
                 ArtifactResult result;
                 try {
@@ -166,11 +177,40 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 }
                 logger.info("[VBE] {}:{}, updating dependency{} {}:{}  {}-->{}", mavenProject.getGroupId(),
                         mavenProject.getArtifactId(), managed?"(M)":"", dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(),
-                        nextVersion);
+                        nextVersion.getVersion());
+                //NOTE: from this point on dependency is has changed
+                final String tmpVersion = dependency.getVersion();
                 mavenProjectVersionUpdater.accept(result.getArtifact());
+                nextVersion.setOldVersion(tmpVersion);
+                reportVersionChange(mavenProject, nextVersion);
+                
             },tester);
             
         }
+    }
+
+    private void reportVersionChange(final MavenProject mavenProject, final VBEVersion nextVersion) {
+        final String id = ProjectReportEntry.generateKey(mavenProject);
+        if(reportMaterial.containsKey(id)) {
+            final ProjectReportEntry entry = reportMaterial.get(id);
+            //This will happen when project has maven dep management and dependency declared...
+            if(entry.hasEntry(nextVersion)) {
+                final VBEVersion existing = entry.get(nextVersion.generateKey(nextVersion));
+                if(!existing.getVersion().equals(nextVersion.getVersion())) {
+                    //logger.error("[VBE] {}:{}, discrepency between managed and dependency verion {}:{}  {}(M)-->{}", mavenProject.getGroupId(),
+                    //    mavenProject.getArtifactId(), nextVersion.getGroupId(), nextVersion.getArtifactId(), existing.getVersion(),
+                    //    nextVersion.getVersion());
+                    existing.markViolation(nextVersion);
+                }
+            }else {
+                entry.addReportArtifact(nextVersion);
+            }
+        } else {
+            final ProjectReportEntry entry = new ProjectReportEntry(mavenProject);
+            entry.addReportArtifact(nextVersion);
+            reportMaterial.put(id, entry);
+        }
+        
     }
 
     /**
@@ -178,7 +218,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
      * @param dependency
      * @param versionConsumer
      */
-    private void resolveDependencyVersionUpdate(final Dependency dependency,final Consumer<String> versionConsumer, final VersionAcceptanceCriteria tester) {
+    private void resolveDependencyVersionUpdate(final Dependency dependency,final Consumer<VBEVersion> versionConsumer, final VersionAcceptanceCriteria tester) {
         try {
             // TODO: discriminate major/minor/micro here?
             final List<MetadataResult> metaDataResults = fetchDependencyMetadata(dependency);
@@ -188,7 +228,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                         dependency.getGroupId(), dependency.getArtifactId());
                 return;
             }
-            final List<MetadataResult> results = fetchDependencyMetadata(dependency);
+            List<MetadataResult> results = fetchDependencyMetadata(dependency);
             if (results == null || results.size() == 0) {
                 logger.info("[VBE] {}:{}, no possible update for dependency {}:{}", session.getCurrentProject().getGroupId(),
                         session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
@@ -196,43 +236,24 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             }
 
             // remove deps that are not good, sort, pick one.
-            final List<Metadata> intermediate = results.stream().filter(m -> m != null && !m.isMissing() && m.isResolved())
-                    .map(s -> s.getMetadata()).collect(Collectors.toList());
+            results = results.stream().filter(m -> m != null && !m.isMissing() && m.isResolved())
+                    .collect(Collectors.toList());
             // TODO: check on release/latest: technically its possible to release previous major/minor?
-            // This is shady and bad, but will do for now...
-//          final List<Versioning> metadataVersioning = new ArrayList<>();
-            //
-//                    for (Metadata result : intermediate) {
-//                        try (FileReader reader = new FileReader(result.getFile())) {
-//                            final org.apache.maven.artifact.repository.metadata.Metadata md = new MetadataXpp3Reader().read(reader);
-//                            final Versioning v = md.getVersioning();
-//                            if (v != null) {
-//                                // yyyymmddHHMMSS --> v.getLastUpdated()
-//                                metadataVersioning.add(v);
-//                            }
-//                        } catch (IOException | XmlPullParserException e) {
-//                            logger.info("[VBE] {}:{}, failed to parse metadata {}:{}. {} {}",
-//                                    session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
-//                                    dependency.getGroupId(), dependency.getArtifactId(), result.getFile(), e.getMessage(), e);
-//                        }
-//                    }
-//                    Set<String> versions = new TreeSet<>(InsaneVersionComparator.INSTANCE.reversed());
-//                    for(Versioning v:metadataVersioning) {
-//                        for(String version:v.getVersions()) {
-//                            versions.add(version);
-//                        }
-//                    }
-//                    //first one should be most senior.
-            // final String possibleUpdate = versions.iterator().next();
-            // //NOTE: just as an exercise: this achieves the same as above, going to leave above for now just in case its not
+
             // easy to mess with Channel API and below streams
-            Optional<String> optionalVersion = intermediate.stream().map(m -> {
+            final List<VBEVersion> allArtifactVersions = new ArrayList<>();
+            for(MetadataResult metadataResult:results) {
+                final Metadata m = metadataResult.getMetadata();
                 try (FileReader reader = new FileReader(m.getFile())) {
                     final org.apache.maven.artifact.repository.metadata.Metadata md = new MetadataXpp3Reader().read(reader);
                     final Versioning v = md.getVersioning();
                     if (v != null) {
                         // yyyymmddHHMMSS --> v.getLastUpdated()
-                        return v;
+                        final List<VBEVersion> unfoldedChunk = unfoldVersioning(metadataResult,v);
+                        allArtifactVersions.addAll(unfoldedChunk);
+                    } else {
+                        //this should not happen?
+                        continue;
                     }
                 } catch (IOException | XmlPullParserException e) {
                     logger.info("[VBE] {}:{}, failed to parse metadata {}:{}. {} {}", session.getCurrentProject().getGroupId(),
@@ -240,23 +261,20 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                             m.getFile(), e.getMessage(), e);
 
                 }
-                return null;
-            }).filter(Objects::nonNull).map(v -> {
-                return v.getVersions();
-            }).flatMap(Collection::stream)
-              .filter(s-> {return tester.accept(dependency.getVersion(), s);})
-              .collect(Collectors.maxBy(InsaneVersionComparator.INSTANCE));
+            }
+            Optional<VBEVersion> optionalVersion = allArtifactVersions.stream()
+              .filter(vbe-> {return tester.accept(dependency.getVersion(), vbe.getVersion());})
+              .collect(Collectors.maxBy(VBEVersionComparator.INSTANCE));
 
             if(!optionalVersion.isPresent()) {
                 logger.info("[VBE] {}:{}, no suitable update {}:{}", session.getCurrentProject().getGroupId(),
                         session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
                 return;
             }
-            final String possibleUpdate = optionalVersion.get();
+            final VBEVersion possibleUpdate = optionalVersion.get();
             // first should be most senior one.
             if (possibleUpdate != null) {
-                if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate, dependency.getVersion()) > 0) {
-                    // This should not happen, though...?
+                if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate.getVersion(), dependency.getVersion()) > 0) {
                     logger.info("[VBE] {}:{}, possible update for dependency {}:{} {}->{}",
                             session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
                             dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(), possibleUpdate);
@@ -278,6 +296,14 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                     session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), e);
             return;
         }
+    }
+
+    private List<VBEVersion> unfoldVersioning(final MetadataResult metadataResult, final Versioning versioning){
+        final List<VBEVersion> list = new ArrayList<>();
+        for(String v:versioning.getVersions()) {
+            list.add(new VBEVersion(metadataResult, v));
+        }
+        return list;
     }
 
     private List<MetadataResult> fetchDependencyMetadata(final Dependency dependency){
@@ -381,7 +407,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         
         final List<RemoteRepository> repositories = new ArrayList<>();
 
-        logger.info("[VBE] Repository present in reactor:");
+        logger.info("[VBE] Repositories present in reactor:");
         for (org.apache.maven.model.Repository repo : session.getCurrentProject().getRepositories()) {
             final String id = repo.getId() == null ? UUID.randomUUID().toString() : repo.getId();
             logger.info("  - {}: {}", id, repo.getUrl());
@@ -397,5 +423,70 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         }
 
         return repositories;
+    }
+
+    private static class ProjectReportEntry /*implements Comparable<ProjectReportEntry>*/ {
+
+        private final Comparator<String> comparator = Comparator.comparing(String::toString);
+        private final Map<String, VBEVersion> reportMaterial = new TreeMap<>(comparator);
+        private final String groupId;
+        private final String artifactId;
+
+        public void report(Logger logger) {
+            //TODO: add file output
+            logger.info("[VBE][REPORT]     project {}:{}", getGroupId(),getArtifactId());
+            this.reportMaterial.values().stream().forEach(v->{
+                logger.info("[VBE]{}             dependency update {}:{}  {}->{}  from {}",v.hasViolations()?"V":" ", v.getGroupId(),v.getArtifactId(), v.getOldVersion(), v.getVersion(), v.getRepositoryUrl());
+                if(v.hasViolations()) {
+                    v.getViolations().stream().forEach(vv->{
+                        logger.info("[VBE]Violation                  {}",vv.getVersion());
+                    });
+                }
+            });
+            
+        }
+
+        public VBEVersion get(String id) {
+            return this.reportMaterial.get(id);
+        }
+
+        public boolean hasEntry(VBEVersion nextVersion) {
+            return this.reportMaterial.containsKey(VBEVersion.generateKey(nextVersion));
+        }
+
+        public void addReportArtifact(VBEVersion nextVersion) {
+            this.reportMaterial.put(nextVersion.generateKey(nextVersion), nextVersion);
+        }
+
+        public ProjectReportEntry(final MavenProject mavenProject) {
+            super();
+            this.groupId = mavenProject.getGroupId();
+            this.artifactId = mavenProject.getArtifactId();
+        }
+
+        public String getGroupId() {
+            return groupId;
+        }
+
+        public String getArtifactId() {
+            return artifactId;
+        }
+        /*
+        @Override
+        public int compareTo(ProjectReportEntry o) {
+            if (o == null) {
+                return 1;
+            } else {
+                return comparator.compare(generateKey(this), generateKey(o));
+            }
+        }
+        */
+        public static final String generateKey(final ProjectReportEntry entry) {
+            return entry.getGroupId() + ":" + entry.getArtifactId();
+        }
+
+        public static final String generateKey(final MavenProject entry) {
+            return entry.getGroupId() + ":" + entry.getArtifactId();
+        }
     }
 }
