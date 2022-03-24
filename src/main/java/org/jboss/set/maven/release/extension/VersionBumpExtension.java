@@ -116,7 +116,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
 
     private void report() {
         logger.info("[VBE][REPORT] Artifact report for main project {}:{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId());
-        this.reportMaterial.values().stream().forEach(v->{v.report(logger);});
+        this.reportMaterial.values().stream().forEach(v->{v.report();});
         logger.info("[VBE][REPORT] ======================================================");
     }
 
@@ -167,13 +167,15 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 try {
                     result = repo.resolveArtifact(session.getRepositorySession(), request);
                 } catch (ArtifactResolutionException e) {
-                    logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}:", mavenProject.getGroupId(),
-                            mavenProject.getArtifactId(), dependency.getGroupId(), managed?"(M)":"", dependency.getArtifactId(), nextVersion);
+                    logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}:{}", mavenProject.getGroupId(),
+                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(),
+                            dependency.getArtifactId(), nextVersion, e);
                     return;
                 }
                 if (result.isMissing() || !result.isResolved()) {
                     logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}:", mavenProject.getGroupId(),
-                            mavenProject.getArtifactId(), dependency.getGroupId(), managed?"(M)":"", dependency.getArtifactId(), nextVersion);
+                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(),
+                            dependency.getArtifactId(), nextVersion);
                     return;
                 }
                 logger.info("[VBE] {}:{}, updating dependency{} {}:{}  {}-->{}", mavenProject.getGroupId(),
@@ -204,7 +206,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 entry.addReportArtifact(nextVersion);
             }
         } else {
-            final ProjectReportEntry entry = new ProjectReportEntry(mavenProject);
+            final ProjectReportEntry entry = new ProjectReportEntry(mavenProject, logger);
             entry.addReportArtifact(nextVersion);
             reportMaterial.put(id, entry);
         }
@@ -429,8 +431,9 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         private final Map<String, VBEVersion> reportMaterial = new TreeMap<>(comparator);
         private final String groupId;
         private final String artifactId;
+        private final Logger logger;
 
-        public void report(Logger logger) {
+        public void report() {
             //TODO: add file output
             logger.info("[VBE][REPORT]     project {}:{}", getGroupId(),getArtifactId());
             this.reportMaterial.values().stream().forEach(v->{
@@ -453,11 +456,13 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         }
 
         public void addReportArtifact(VBEVersion nextVersion) {
+            logger.info("XXX: {}:{} -> {}:{}",this.groupId,this.artifactId, VBEVersion.generateKey(nextVersion), nextVersion.getVersion());
             this.reportMaterial.put(nextVersion.generateKey(nextVersion), nextVersion);
         }
 
-        public ProjectReportEntry(final MavenProject mavenProject) {
+        public ProjectReportEntry(final MavenProject mavenProject, final Logger logger) {
             super();
+            this.logger = logger;
             this.groupId = mavenProject.getGroupId();
             this.artifactId = mavenProject.getArtifactId();
         }
