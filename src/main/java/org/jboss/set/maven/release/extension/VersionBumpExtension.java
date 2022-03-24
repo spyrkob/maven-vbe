@@ -169,7 +169,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 } catch (ArtifactResolutionException e) {
                     logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}:{}", mavenProject.getGroupId(),
                             mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(),
-                            dependency.getArtifactId(), nextVersion, e);
+                            dependency.getArtifactId(), nextVersion.getVersion(), e);
                     return;
                 }
                 if (result.isMissing() || !result.isResolved()) {
