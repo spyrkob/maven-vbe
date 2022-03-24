@@ -117,6 +117,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     private void report() {
         logger.info("[VBE][REPORT] Artifact report for main project {}:{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId());
         this.reportMaterial.values().stream().forEach(v->{v.report(logger);});
+        logger.info("[VBE][REPORT] ======================================================");
     }
 
     private void processProject(final MavenProject mavenProject) {
@@ -197,9 +198,6 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             if(entry.hasEntry(nextVersion)) {
                 final VBEVersion existing = entry.get(nextVersion.generateKey(nextVersion));
                 if(!existing.getVersion().equals(nextVersion.getVersion())) {
-                    //logger.error("[VBE] {}:{}, discrepency between managed and dependency verion {}:{}  {}(M)-->{}", mavenProject.getGroupId(),
-                    //    mavenProject.getArtifactId(), nextVersion.getGroupId(), nextVersion.getArtifactId(), existing.getVersion(),
-                    //    nextVersion.getVersion());
                     existing.markViolation(nextVersion);
                 }
             }else {
@@ -277,13 +275,13 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate.getVersion(), dependency.getVersion()) > 0) {
                     logger.info("[VBE] {}:{}, possible update for dependency {}:{} {}->{}",
                             session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
-                            dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(), possibleUpdate);
+                            dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(), possibleUpdate.getVersion());
                     versionConsumer.accept(possibleUpdate);
                     return;
                 } else {
                     logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
                             session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
-                            dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(), possibleUpdate);
+                            dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(), possibleUpdate.getVersion());
                     return;
                 }
             } else {
@@ -436,7 +434,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             //TODO: add file output
             logger.info("[VBE][REPORT]     project {}:{}", getGroupId(),getArtifactId());
             this.reportMaterial.values().stream().forEach(v->{
-                logger.info("[VBE]{}             dependency update {}:{}  {}->{}  from {}",v.hasViolations()?"V":" ", v.getGroupId(),v.getArtifactId(), v.getOldVersion(), v.getVersion(), v.getRepositoryUrl());
+                logger.info("[VBE]{}                {}:{}  {}->{}  from {}",v.hasViolations()?"V":" ", v.getGroupId(),v.getArtifactId(), v.getOldVersion(), v.getVersion(), v.getRepositoryUrl());
                 if(v.hasViolations()) {
                     v.getViolations().stream().forEach(vv->{
                         logger.info("[VBE]Violation                  {}",vv.getVersion());

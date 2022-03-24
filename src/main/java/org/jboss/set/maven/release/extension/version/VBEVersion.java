@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.resolution.MetadataResult;
 
 /**
@@ -24,7 +25,9 @@ public class VBEVersion {
         this.version = v;
         this.artifactId = metadataResult.getRequest().getMetadata().getArtifactId();
         this.groupId = metadataResult.getRequest().getMetadata().getGroupId();
-        this.repositoryUrl = metadataResult.getRequest().getRepository().getUrl();
+        //possibly local cache?
+        RemoteRepository maybeNull = metadataResult.getRequest().getRepository();
+        this.repositoryUrl = maybeNull != null ? maybeNull.getUrl() : "<NONE>";
     }
     
     public static final String generateKey(final VBEVersion entry) {
