@@ -164,7 +164,6 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 DefaultArtifact requestedArtifact = new DefaultArtifact(String.format("%s:%s:%s:%s", dependency.getGroupId(),
                         dependency.getArtifactId(), dependency.getType(), nextVersion.getVersion()));
                 request.setArtifact(requestedArtifact);
-                //TODO: VBEG
                 request.setRepositories(Collections.singletonList(nextVersion.getRepository()));
                 ArtifactResult result;
                 try {
@@ -459,7 +458,6 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         }
 
         public void addReportArtifact(VBEVersion nextVersion) {
-            logger.info("XXX: {}:{} -> {}:{}",this.groupId,this.artifactId, VBEVersion.generateKey(nextVersion), nextVersion.getVersion());
             this.reportMaterial.put(nextVersion.generateKey(nextVersion), nextVersion);
         }
 
