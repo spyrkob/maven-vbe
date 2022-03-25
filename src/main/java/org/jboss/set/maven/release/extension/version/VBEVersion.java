@@ -21,6 +21,7 @@ public class VBEVersion {
     private final String groupId;
     private String oldVersion;
     private List<VBEVersion> violations = new ArrayList<>();
+    private RemoteRepository repository;
     public VBEVersion(MetadataResult metadataResult, String v) {
         this.version = v;
         this.artifactId = metadataResult.getRequest().getMetadata().getArtifactId();
@@ -28,6 +29,7 @@ public class VBEVersion {
         //possibly local cache?
         RemoteRepository maybeNull = metadataResult.getRequest().getRepository();
         this.repositoryUrl = maybeNull != null ? maybeNull.getUrl() : "<NONE>";
+        this.repository = metadataResult.getRequest().getRepository();
     }
     
     public static final String generateKey(final VBEVersion entry) {
@@ -38,6 +40,9 @@ public class VBEVersion {
         return repositoryUrl;
     }
 
+    public RemoteRepository getRepository() {
+        return this.repository;
+    }
     public String getVersion() {
         return version;
     }

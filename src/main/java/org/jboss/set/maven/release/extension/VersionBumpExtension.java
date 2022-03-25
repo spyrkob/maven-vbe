@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -163,6 +164,8 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 DefaultArtifact requestedArtifact = new DefaultArtifact(String.format("%s:%s:%s:%s", dependency.getGroupId(),
                         dependency.getArtifactId(), dependency.getType(), nextVersion.getVersion()));
                 request.setArtifact(requestedArtifact);
+                //TODO: VBEG
+                request.setRepositories(Collections.singletonList(nextVersion.getRepository()));
                 ArtifactResult result;
                 try {
                     result = repo.resolveArtifact(session.getRepositorySession(), request);
