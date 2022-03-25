@@ -223,7 +223,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     private void resolveDependencyVersionUpdate(final Dependency dependency,final Consumer<VBEVersion> versionConsumer, final VersionAcceptanceCriteria tester) {
         try {
             // TODO: discriminate major/minor/micro here?
-            final List<MetadataResult> results = fetchDependencyMetadata(dependency);
+            List<MetadataResult> results = fetchDependencyMetadata(dependency);
             if (results.size() == 0) {
                 logger.info("[VBE] {}:{}, failed to fetch metadata for dependency {}:{}",
                         session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
