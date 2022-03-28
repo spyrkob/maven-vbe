@@ -48,7 +48,7 @@ import org.eclipse.aether.resolution.ArtifactResult;
 import org.eclipse.aether.resolution.MetadataRequest;
 import org.eclipse.aether.resolution.MetadataResult;
 import org.jboss.set.maven.release.extension.version.InsaneVersionComparator;
-import org.jboss.set.maven.release.extension.version.RedhatVersionAcceptor;
+import org.jboss.set.maven.release.extension.version.RedHatVersionAcceptor;
 import org.jboss.set.maven.release.extension.version.VBEVersion;
 import org.jboss.set.maven.release.extension.version.VBEVersionComparator;
 import org.jboss.set.maven.release.extension.version.VersionAcceptanceCriteria;
@@ -73,7 +73,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     //yeah, not a best practice
     private MavenSession session;
     private List<RemoteRepository> repositories;
-    private VersionAcceptanceCriteria versionTester = new RedhatVersionAcceptor();
+    private VersionAcceptanceCriteria versionTester = new RedHatVersionAcceptor();
     private Map<String,ProjectReportEntry> reportMaterial = new TreeMap<>(Comparator.comparing(String::toString));
     @Override
     public void afterSessionStart(MavenSession session) throws MavenExecutionException {
@@ -224,16 +224,10 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         try {
             // TODO: discriminate major/minor/micro here?
             List<MetadataResult> results = fetchDependencyMetadata(dependency);
-            if (results.size() == 0) {
+            if (results == null || results.size() == 0) {
                 logger.info("[VBE] {}:{}, failed to fetch metadata for dependency {}:{}",
                         session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
                         dependency.getGroupId(), dependency.getArtifactId());
-                return;
-            }
-
-            if (results == null || results.size() == 0) {
-                logger.info("[VBE] {}:{}, no possible update for dependency {}:{}", session.getCurrentProject().getGroupId(),
-                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
                 return;
             }
 
@@ -370,7 +364,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
 
                 if(this.versionTester == null) {
                     logger.warn("[VBE] {}:{}, no version acceptor, defualting to 'RedhatVersionAcceptor'", session.getCurrentProject().getGroupId());
-                    this.versionTester = new RedhatVersionAcceptor();
+                    this.versionTester = new RedHatVersionAcceptor();
                 }
             } else {
                 //first is RHT
@@ -378,7 +372,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             }
         } else {
             logger.warn("[VBE] {}:{}, no version acceptor, defualting to 'RedhatVersionAcceptor'", session.getCurrentProject().getGroupId());
-            this.versionTester = new RedhatVersionAcceptor();
+            this.versionTester = new RedHatVersionAcceptor();
         }
     }
 
