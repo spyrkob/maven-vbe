@@ -19,7 +19,7 @@
  * Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
  * 02110-1301 USA, or see the FSF site: http://www.fsf.org.
  */
-package org.jboss.set.maven.release.extension.version;
+package org.jboss.set.maven.release.extension;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,22 +28,27 @@ import java.util.List;
 import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.resolution.MetadataResult;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+
 /**
  * Class to hold everything
  * 
  * @author baranowb
  *
  */
-public class VBEVersion {
+@JsonPropertyOrder({ "groupId", "artifactId", "oldVersion", "version", "repositoryUrl", "violations" })
+@JsonIgnoreProperties("repository")
+public class VBEVersionUpdate {
 
     private final String repositoryUrl;
     private final String version;
     private final String artifactId;
     private final String groupId;
     private String oldVersion;
-    private List<VBEVersion> violations = new ArrayList<>();
+    private List<VBEVersionUpdate> violations = new ArrayList<>();
     private RemoteRepository repository;
-    public VBEVersion(MetadataResult metadataResult, String v) {
+    public VBEVersionUpdate(MetadataResult metadataResult, String v) {
         this.version = v;
         this.artifactId = metadataResult.getRequest().getMetadata().getArtifactId();
         this.groupId = metadataResult.getRequest().getMetadata().getGroupId();
@@ -53,7 +58,7 @@ public class VBEVersion {
         this.repository = metadataResult.getRequest().getRepository();
     }
     
-    public static final String generateKey(final VBEVersion entry) {
+    public static final String generateKey(final VBEVersionUpdate entry) {
         return entry.getGroupId() + ":" + entry.getArtifactId();
     }
 
@@ -76,7 +81,7 @@ public class VBEVersion {
         return groupId;
     }
 
-    public void markViolation(VBEVersion nextVersion) {
+    public void markViolation(VBEVersionUpdate nextVersion) {
         this.violations.add(nextVersion);
     }
 
@@ -92,7 +97,7 @@ public class VBEVersion {
         return this.oldVersion;
     }
 
-    public Collection<VBEVersion> getViolations() {
+    public Collection<VBEVersionUpdate> getViolations() {
         return this.violations;
     }
     // NOTE: URL ?
@@ -114,7 +119,7 @@ public class VBEVersion {
             return false;
         if (getClass() != obj.getClass())
             return false;
-        VBEVersion other = (VBEVersion) obj;
+        VBEVersionUpdate other = (VBEVersionUpdate) obj;
         if (artifactId == null) {
             if (other.artifactId != null)
                 return false;
