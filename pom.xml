@@ -135,4 +135,19 @@
 			</plugin>
 		</plugins>
 	</build>
+	<scm>
+		<connection>scm:git:git://github.com/jboss-set/maven-vbe.git</connection>
+		<developerConnection>scm:git:git@github.com:jboss-set/maven-vbe.git</developerConnection>
+		<url>https://github.com/jboss-set/maven-vbe</url>
+		<tag>HEAD</tag>
+	</scm>
+	<licenses>
+        <license>
+            <name>GNU General Lesser Public License (LGPL) version 3.0</name>
+            <url>http://www.gnu.org/licenses/lgpl-3.0.html</url>
+            <distribution>repo</distribution>
+            <comments>Source's header state LGPL but no version, hence v3 is assumed here.
+            </comments>
+        </license>
+    </licenses>
 </project>

@@ -25,7 +25,6 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -144,7 +143,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
 
     private void report() {
         logger.info("[VBE][REPORT] Artifact report for main project {}:{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId());
-        this.reportMaterial.values().stream().forEach(v->{v.report();});
+        this.reportMaterial.values().stream().forEach(v->{v.report(logger);});
         logger.info("[VBE][REPORT] ======================================================");
 
         //now print log yaml log file if need be
@@ -256,7 +255,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 entry.addReportArtifact(nextVersion);
             }
         } else {
-            final ProjectReportEntry entry = new ProjectReportEntry(mavenProject, logger);
+            final ProjectReportEntry entry = new ProjectReportEntry(mavenProject);
             entry.addReportArtifact(nextVersion);
             reportMaterial.put(id, entry);
         }

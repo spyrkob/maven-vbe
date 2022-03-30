@@ -37,7 +37,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
  * @author baranowb
  *
  */
-@JsonPropertyOrder({ "groupId", "artifactId", "oldVersion", "version", "repositoryUrl", "violations" })
+@JsonPropertyOrder({ "groupId", "artifactId", "version", "oldVersion", "repositoryUrl", "violations" })
 @JsonIgnoreProperties("repository")
 public class VBEVersionUpdate {
 
