@@ -7,7 +7,7 @@
 	</parent>
 	<groupId>org.jboss.set.maven</groupId>
 	<artifactId>jboss-set-version-bump-extension</artifactId>
-	<version>0.0.1.Final</version>
+	<version>0.0.2-SNAPSHOT</version>
 	<name>jboss-set-version-bump-extension</name>
 
 
@@ -144,7 +144,7 @@
 		<connection>scm:git:git://github.com/jboss-set/maven-vbe.git</connection>
 		<developerConnection>scm:git:git@github.com:jboss-set/maven-vbe.git</developerConnection>
 		<url>https://github.com/jboss-set/maven-vbe</url>
-		<tag>jboss-set-version-bump-extension-0.0.1.Final</tag>
+		<tag>HEAD</tag>
 	</scm>
 	<licenses>
 		<license>
