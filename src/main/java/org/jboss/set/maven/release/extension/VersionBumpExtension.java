@@ -21,21 +21,23 @@
  */
 package org.jboss.set.maven.release.extension;
 
+import static java.util.Collections.emptySet;
+import static java.util.Objects.requireNonNull;
+
 import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Properties;
-import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -45,8 +47,6 @@ import java.util.stream.Collectors;
 
 import org.apache.maven.AbstractMavenLifecycleParticipant;
 import org.apache.maven.MavenExecutionException;
-import org.apache.maven.artifact.repository.metadata.Versioning;
-import org.apache.maven.artifact.repository.metadata.io.xpp3.MetadataXpp3Reader;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.model.Dependency;
 import org.apache.maven.model.DependencyManagement;
@@ -57,32 +57,37 @@ import org.codehaus.plexus.component.annotations.Component;
 import org.codehaus.plexus.component.annotations.Requirement;
 import org.codehaus.plexus.configuration.xml.XmlPlexusConfiguration;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
-import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
-import org.eclipse.aether.metadata.DefaultMetadata;
-import org.eclipse.aether.metadata.Metadata;
 import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.resolution.ArtifactRequest;
 import org.eclipse.aether.resolution.ArtifactResolutionException;
 import org.eclipse.aether.resolution.ArtifactResult;
-import org.eclipse.aether.resolution.MetadataRequest;
-import org.eclipse.aether.resolution.MetadataResult;
+import org.eclipse.aether.resolution.VersionRangeRequest;
+import org.eclipse.aether.resolution.VersionRangeResolutionException;
+import org.eclipse.aether.resolution.VersionRangeResult;
+import org.eclipse.aether.version.Version;
 import org.jboss.set.maven.release.extension.log.ReportFile;
 import org.jboss.set.maven.release.extension.version.InsaneVersionComparator;
-import org.jboss.set.maven.release.extension.version.RedHatVersionAcceptor;
-import org.jboss.set.maven.release.extension.version.VBEVersionComparator;
-import org.jboss.set.maven.release.extension.version.VersionAcceptanceCriteria;
 import org.slf4j.Logger;
+import org.wildfly.channel.Channel;
+import org.wildfly.channel.ChannelMapper;
+import org.wildfly.channel.ChannelSession;
+import org.wildfly.channel.MavenArtifact;
+import org.wildfly.channel.UnresolvedMavenArtifactException;
+import org.wildfly.channel.spi.MavenVersionsResolver;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 @Component(role = AbstractMavenLifecycleParticipant.class, hint = "mailman")
 public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
-    //comma separated list of repo names, as defined in pom( I think )
-    String VBE_REPOSITORY_NAMES = "vbe.repository.names";
-    String VBE_LOG_FILE = "vbe.log.file";
+    // comma separated list of repo names, as defined in pom( I think )
+    final String VBE_REPOSITORY_NAMES = "vbe.repository.names";
+    final String VBE_LOG_FILE = "vbe.log.file";
+    final String VBE_CHANNELS = "vbe.channels";
+
     private static final String DEFAULT_LOG_FILE = "vbe.update.yaml";
     @Requirement
     private Logger logger;
@@ -96,11 +101,13 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     // coordinates of the plugin itself
     private String pluginGroupId;
     private String pluginArtifactId;
-    //yeah, not a best practice
+    // yeah, not a best practice
     private MavenSession session;
     private List<RemoteRepository> repositories;
-    private VersionAcceptanceCriteria versionTester = new RedHatVersionAcceptor();
-    private Map<String,ProjectReportEntry> reportMaterial = new TreeMap<>(Comparator.comparing(String::toString));
+    private ChannelSession channelSession;
+    // Report part
+    private Map<String, ProjectReportEntry> reportMaterial = new TreeMap<>(Comparator.comparing(String::toString));
+
     @Override
     public void afterSessionStart(MavenSession session) throws MavenExecutionException {
         super.afterSessionStart(session);
@@ -110,24 +117,23 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     @Override
     public void afterProjectsRead(final MavenSession session) throws MavenExecutionException {
         logger.info("\n\n========== Red Hat Channel Version Extension[VBE] Starting ==========\n");
-        //NOTE: this will work only for project defined deps, if something is in parent, it ~cant be changed.
+        // NOTE: this will work only for project defined deps, if something is in parent, it ~cant be changed.
         if (session == null) {
             return;
         }
 
         this.session = session;
         long ts = System.currentTimeMillis();
-        configureProperties(session);
 
         if (!shouldSkip(session)) {
-          //NOTE: iterate over artifacts/deps and find most recent version available in repos
-            //TODO: inject channels into this, as now it will just consume whole repo, its fine as long as it is sanitazed
-            configure(session);
+            // NOTE: iterate over artifacts/deps and find most recent version available in repos
+            // TODO: inject channels into this, as now it will just consume whole repo, its fine as long as it is sanitazed
+            configure();
 
-            //NOTE: to handle ALL modules. Those are different "projects"
-            for(MavenProject mavenProject:session.getAllProjects()) {
-                //TODO: debug and check if this will cover dep/parent projects
-                //TODO: determine if we need to update every project?
+            // NOTE: to handle ALL modules. Those are different "projects"
+            for (MavenProject mavenProject : session.getAllProjects()) {
+                // TODO: debug and check if this will cover dep/parent projects
+                // TODO: determine if we need to update every project?
                 logger.info("[VBE][PROCESSING]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
                 if (mavenProject.getDependencyManagement() != null) {
                     processProject(mavenProject);
@@ -138,34 +144,48 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             report();
         }
 
-        logger.info("\n\n========== Red Hat Channel Version Extension Finished in " + (System.currentTimeMillis() - ts) + "ms ==========\n");
+        logger.info("\n\n========== Red Hat Channel Version Extension Finished in " + (System.currentTimeMillis() - ts)
+                + "ms ==========\n");
     }
 
     private void report() {
-        logger.info("[VBE][REPORT] Artifact report for main project {}:{}", session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId());
-        this.reportMaterial.values().stream().forEach(v->{v.report(logger);});
+        logger.info("[VBE][REPORT] Artifact report for main project {}:{}", session.getCurrentProject().getGroupId(),
+                session.getCurrentProject().getArtifactId());
+        this.reportMaterial.values().stream().forEach(v -> {
+            v.report(logger);
+        });
         logger.info("[VBE][REPORT] ======================================================");
 
-        //now print log yaml log file if need be
-        final Supplier<Collection<ProjectReportEntry>> s= () -> {return reportMaterial.values();};
-        final Supplier<String> groupIdSupplier = () -> {return session.getCurrentProject().getGroupId();};
-        final Supplier<String> artifactIdSupplier = () -> {return session.getCurrentProject().getArtifactId();};
-        final List<String> presentRepositories = session.getCurrentProject().getRepositories().stream().map(mr -> { return mr.getUrl(); }).collect(Collectors.toList());
-        final List<String> activeRepositories = repositories.stream().map(rr -> { return rr.getUrl(); }).collect(Collectors.toList());
+        // now print log yaml log file if need be
+        final Supplier<Collection<ProjectReportEntry>> s = () -> {
+            return reportMaterial.values();
+        };
+        final Supplier<String> groupIdSupplier = () -> {
+            return session.getCurrentProject().getGroupId();
+        };
+        final Supplier<String> artifactIdSupplier = () -> {
+            return session.getCurrentProject().getArtifactId();
+        };
+        final List<String> presentRepositories = session.getCurrentProject().getRepositories().stream().map(mr -> {
+            return mr.getUrl();
+        }).collect(Collectors.toList());
+        final List<String> activeRepositories = repositories.stream().map(rr -> {
+            return rr.getUrl();
+        }).collect(Collectors.toList());
 
-        final ReportFile reportFile = new ReportFile(groupIdSupplier, artifactIdSupplier, presentRepositories, activeRepositories, s);
+        final ReportFile reportFile = new ReportFile(groupIdSupplier, artifactIdSupplier, presentRepositories,
+                activeRepositories, s);
 
         String logFile = System.getProperty(VBE_LOG_FILE);
-        logFile = logFile != null?logFile:session.getExecutionRootDirectory()+File.separator+DEFAULT_LOG_FILE;
+        logFile = logFile != null ? logFile : session.getExecutionRootDirectory() + File.separator + DEFAULT_LOG_FILE;
         ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
         mapper.findAndRegisterModules();
         try {
-             mapper.writeValue(new File(logFile), reportFile);
-        } catch(Exception e) {
-            logger.error("[VBE] {}:{}, failed to write log file '{}' {}", session.getCurrentProject().getGroupId(),
-                   logFile, e);
+            mapper.writeValue(new File(logFile), reportFile);
+        } catch (Exception e) {
+            logger.error("[VBE] {}:{}, failed to write log file '{}' {}", session.getCurrentProject().getGroupId(), logFile, e);
         }
-        
+
     }
 
     private void processProject(final MavenProject mavenProject) {
@@ -174,84 +194,78 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         if (mavenProject.getDependencyManagement() != null) {
             final DependencyManagement dependencyManagement = mavenProject.getDependencyManagement();
             for (Dependency dependency : dependencyManagement.getDependencies()) {
-                updateDependency(mavenProject, dependency, true, (org.eclipse.aether.artifact.Artifact a) -> {
+                updateDependency(mavenProject, dependency, true, (MavenArtifact a) -> {
                     mavenProject.getManagedVersionMap().get(dependency.getManagementKey()).setResolvedVersion(a.getVersion());
                     mavenProject.getManagedVersionMap().get(dependency.getManagementKey()).setVersion(a.getVersion());
                     dependency.setVersion(a.getVersion());
-                }, versionTester);
+                });
             }
         }
 
         for (Dependency dependency : mavenProject.getDependencies()) {
-            updateDependency(mavenProject, dependency, false, (org.eclipse.aether.artifact.Artifact a) -> {
+            updateDependency(mavenProject, dependency, false, (MavenArtifact a) -> {
                 dependency.setVersion(a.getVersion());
-            }, versionTester);
+            });
         }
     }
 
     /**
      * Update dependency if possible and/or desired.
+     * 
      * @param mavenProject
      * @param dependency
      * @param managed
      * @param mavenProjectVersionUpdater - artifact consumer which will perform maven model/pojo updates
      */
     private void updateDependency(final MavenProject mavenProject, final Dependency dependency, final boolean managed,
-            final Consumer<org.eclipse.aether.artifact.Artifact> mavenProjectVersionUpdater, final VersionAcceptanceCriteria tester) {
-        if (!shouldProcess(dependency)) {
-            logger.info("[VBE] {}:{}, skipping dependency{} {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId(),
-                    managed?"(M)":"",dependency.getGroupId(), dependency.getArtifactId());
-        } else {
-            resolveDependencyVersionUpdate(dependency, nextVersion ->{
-                // fetch artifact
-                if (nextVersion == null || nextVersion.getVersion().equals(dependency.getVersion())) {
-                    return;
-                }
-                ArtifactRequest request = new ArtifactRequest();
-                DefaultArtifact requestedArtifact = new DefaultArtifact(String.format("%s:%s:%s:%s", dependency.getGroupId(),
-                        dependency.getArtifactId(), dependency.getType(), nextVersion.getVersion()));
-                request.setArtifact(requestedArtifact);
-                request.setRepositories(Collections.singletonList(nextVersion.getRepository()));
-                ArtifactResult result;
-                try {
-                    result = repo.resolveArtifact(session.getRepositorySession(), request);
-                } catch (ArtifactResolutionException e) {
+            final Consumer<MavenArtifact> mavenProjectVersionUpdater) {
+        resolveDependencyVersionUpdate(dependency, nextVersion -> {
+            // NOTE: since default session does not contain repositories that are in channels we have to fetch EVERYTHING
+            if (nextVersion == null || nextVersion.getVersion().equals(dependency.getVersion())) {
+                return;
+            }
+
+            MavenArtifact result;
+            try {
+                result = this.channelSession.resolveMavenArtifact(dependency.getGroupId(), dependency.getArtifactId(), dependency.getType(),
+                        null, nextVersion.getVersion());
+            } catch (UnresolvedMavenArtifactException e) {
+                if(logger.isDebugEnabled()) {
                     logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}:{}", mavenProject.getGroupId(),
-                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(),
-                            dependency.getArtifactId(), nextVersion.getVersion(), e);
-                    return;
+                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(), dependency.getArtifactId(),
+                            nextVersion.getVersion(), e);
+                } else {
+                    logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}", mavenProject.getGroupId(),
+                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(), dependency.getArtifactId(),
+                            nextVersion.getVersion());
                 }
-                if (result.isMissing() || !result.isResolved()) {
-                    logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}:", mavenProject.getGroupId(),
-                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(),
-                            dependency.getArtifactId(), nextVersion);
-                    return;
-                }
-                logger.info("[VBE] {}:{}, updating dependency{} {}:{}  {}-->{}", mavenProject.getGroupId(),
-                        mavenProject.getArtifactId(), managed?"(M)":"", dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(),
-                        nextVersion.getVersion());
-                //NOTE: from this point on dependency is has changed
-                final String tmpVersion = dependency.getVersion();
-                mavenProjectVersionUpdater.accept(result.getArtifact());
-                nextVersion.setOldVersion(tmpVersion);
-                reportVersionChange(mavenProject, nextVersion);
                 
-            },tester);
-            
-        }
+                return;
+            }
+
+            logger.info("[VBE] {}:{}, updating dependency{} {}:{}  {}-->{}", mavenProject.getGroupId(),
+                    mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(), dependency.getArtifactId(),
+                    dependency.getVersion(), nextVersion.getVersion());
+            // NOTE: from this point on dependency is has changed
+            final String tmpVersion = dependency.getVersion();
+            mavenProjectVersionUpdater.accept(result);
+            nextVersion.setOldVersion(tmpVersion);
+            reportVersionChange(mavenProject, nextVersion);
+
+        });
     }
 
     private void reportVersionChange(final MavenProject mavenProject, final VBEVersionUpdate nextVersion) {
         final String id = ProjectReportEntry.generateKey(mavenProject);
-        if(reportMaterial.containsKey(id)) {
+        if (reportMaterial.containsKey(id)) {
             final ProjectReportEntry entry = reportMaterial.get(id);
-            //This will happen when project has maven dep management and dependency declared...
-            if(entry.hasEntry(nextVersion)) {
+            // This will happen when project has maven dep management and dependency declared...
+            if (entry.hasEntry(nextVersion)) {
                 final VBEVersionUpdate existing = entry.get(nextVersion.generateKey(nextVersion));
-                if(!existing.getVersion().equals(nextVersion.getVersion())) {
+                if (!existing.getVersion().equals(nextVersion.getVersion())) {
                     existing.markViolation(nextVersion);
                 }
-            }else {
+            } else {
                 entry.addReportArtifact(nextVersion);
             }
         } else {
@@ -259,110 +273,53 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             entry.addReportArtifact(nextVersion);
             reportMaterial.put(id, entry);
         }
-        
+
     }
 
     /**
      * Perform metadata look up and determine if there is more recent version. If there is, pass it to consumer.
+     * 
      * @param dependency
      * @param versionConsumer
      */
-    private void resolveDependencyVersionUpdate(final Dependency dependency,final Consumer<VBEVersionUpdate> versionConsumer, final VersionAcceptanceCriteria tester) {
+    private void resolveDependencyVersionUpdate(final Dependency dependency, final Consumer<VBEVersionUpdate> versionConsumer) {
         try {
             // TODO: discriminate major/minor/micro here?
-            List<MetadataResult> results = fetchDependencyMetadata(dependency);
-            if (results == null || results.size() == 0) {
-                logger.info("[VBE] {}:{}, failed to fetch metadata for dependency {}:{}",
+            final String possibleVersionUpdate = this.channelSession.findLatestMavenArtifactVersion(dependency.getGroupId(),
+                    dependency.getArtifactId(), null, null);
+            final VBEVersionUpdate possibleUpdate = new VBEVersionUpdate(dependency.getGroupId(), dependency.getArtifactId(),
+                    possibleVersionUpdate);
+            possibleUpdate.setOldVersion(dependency.getVersion());
+
+            if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate.getVersion(), possibleUpdate.getOldVersion()) > 0) {
+                logger.info("[VBE] {}:{}, possible update for dependency {}:{} {}->{}",
                         session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
-                        dependency.getGroupId(), dependency.getArtifactId());
+                        dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
+                        possibleUpdate.getVersion());
+                versionConsumer.accept(possibleUpdate);
                 return;
-            }
-
-            // remove deps that are not good, sort, pick one.
-            results = results.stream().filter(m -> m != null && !m.isMissing() && m.isResolved())
-                    .collect(Collectors.toList());
-            // TODO: check on release/latest: technically its possible to release previous major/minor?
-
-            // easy to mess with Channel API and below streams
-            final List<VBEVersionUpdate> allArtifactVersions = new ArrayList<>();
-            for(MetadataResult metadataResult:results) {
-                final Metadata m = metadataResult.getMetadata();
-                try (FileReader reader = new FileReader(m.getFile())) {
-                    final org.apache.maven.artifact.repository.metadata.Metadata md = new MetadataXpp3Reader().read(reader);
-                    final Versioning v = md.getVersioning();
-                    if (v != null) {
-                        // yyyymmddHHMMSS --> v.getLastUpdated()
-                        final List<VBEVersionUpdate> unfoldedChunk = unfoldVersioning(metadataResult,v);
-                        allArtifactVersions.addAll(unfoldedChunk);
-                    } else {
-                        //this should not happen?
-                        continue;
-                    }
-                } catch (IOException | XmlPullParserException e) {
-                    logger.info("[VBE] {}:{}, failed to parse metadata {}:{}. {} {}", session.getCurrentProject().getGroupId(),
-                            session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(),
-                            m.getFile(), e.getMessage(), e);
-
-                }
-            }
-            Optional<VBEVersionUpdate> optionalVersion = allArtifactVersions.stream()
-              .filter(vbe-> {return tester.accept(dependency.getVersion(), vbe.getVersion());})
-              .collect(Collectors.maxBy(VBEVersionComparator.INSTANCE));
-
-            if(!optionalVersion.isPresent()) {
-                logger.info("[VBE] {}:{}, no suitable update {}:{}", session.getCurrentProject().getGroupId(),
-                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
-                return;
-            }
-            final VBEVersionUpdate possibleUpdate = optionalVersion.get();
-            // first should be most senior one.
-            if (possibleUpdate != null) {
-                if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate.getVersion(), dependency.getVersion()) > 0) {
-                    logger.info("[VBE] {}:{}, possible update for dependency {}:{} {}->{}",
-                            session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
-                            dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(), possibleUpdate.getVersion());
-                    versionConsumer.accept(possibleUpdate);
-                    return;
-                } else {
-                    logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
-                            session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
-                            dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion(), possibleUpdate.getVersion());
-                    return;
-                }
             } else {
-                logger.info("[VBE] {}:{}, no possible update for dependency {}:{}", session.getCurrentProject().getGroupId(),
-                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
+                logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
+                        session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
+                        dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
+                        possibleUpdate.getVersion());
                 return;
             }
+
         } catch (Exception e) {
-            logger.error("[VBE] {}:{}, failed to fetch info for {}:{} -> {}", session.getCurrentProject().getGroupId(),
-                    session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), e);
+            if(logger.isDebugEnabled()) {
+                logger.error("[VBE] {}:{}, failed to fetch info for {}:{} -> {}", session.getCurrentProject().getGroupId(),
+                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), e);
+            } else {
+                logger.error("[VBE] {}:{}, failed to fetch info for {}:{}", session.getCurrentProject().getGroupId(),
+                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
+            }
             return;
         }
     }
 
-    private List<VBEVersionUpdate> unfoldVersioning(final MetadataResult metadataResult, final Versioning versioning){
-        final List<VBEVersionUpdate> list = new ArrayList<>();
-        for(String v:versioning.getVersions()) {
-            list.add(new VBEVersionUpdate(metadataResult, v));
-        }
-        return list;
-    }
-
-    private List<MetadataResult> fetchDependencyMetadata(final Dependency dependency){
-        final List<MetadataRequest> requests = new ArrayList<>(repositories.size());
-        DefaultMetadata md = new DefaultMetadata(dependency.getGroupId(), dependency.getArtifactId(), "maven-metadata.xml", Metadata.Nature.RELEASE);
-        // local repository
-        requests.add(new MetadataRequest(md, null, ""));
-        // remote repositories
-        for (RemoteRepository repo : repositories) {
-            requests.add(new MetadataRequest(md, repo, ""));
-        }
-        return repo.resolveMetadata(session.getRepositorySession(), requests);
-    }
-
     private boolean shouldProcess(final Dependency dependency) {
-        //TODO: check if there is Channel defined
+        // TODO: check if there is Channel defined
         return true;
     }
 
@@ -393,61 +350,35 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         return skip != null && skip;
     }
 
-    private void configure(final MavenSession session) throws MavenExecutionException {
-        this.repositories = configureRepositories(session);
-        final ServiceLoader<VersionAcceptanceCriteria> versionAcceptanceServices = ServiceLoader.load(VersionAcceptanceCriteria.class);
-        final Iterator<VersionAcceptanceCriteria> it = versionAcceptanceServices.iterator();
-        if(it.hasNext()) {
-            final String property = System.getProperty(VersionAcceptanceCriteria.VBE_VERSION_ACCEPTOR_PROPERTY);
-            if(property != null && property.length() > 0) {
-                while(it.hasNext()) {
-                    final VersionAcceptanceCriteria tmp = it.next();
-                    final String className = tmp.getClass().getName(); 
-                    if(className.endsWith(property) || className.equals(property)) {
-                        this.versionTester = tmp;
-                        break;
-                    }
-                }
-
-                if(this.versionTester == null) {
-                    logger.warn("[VBE] {}:{}, no version acceptor, defualting to 'RedhatVersionAcceptor'", session.getCurrentProject().getGroupId());
-                    this.versionTester = new RedHatVersionAcceptor();
-                }
-            } else {
-                //first is RHT
-                this.versionTester = it.next();
-            }
-        } else {
-            logger.warn("[VBE] {}:{}, no version acceptor, defualting to 'RedhatVersionAcceptor'", session.getCurrentProject().getGroupId());
-            this.versionTester = new RedHatVersionAcceptor();
-        }
+    private void configure() throws MavenExecutionException {
+        this.configureProperties();
+        this.configureRepositories();
+        this.configureChannels();
     }
 
-    private void configureProperties(MavenSession session) throws MavenExecutionException {
+    private void configureProperties() throws MavenExecutionException {
         Properties props = new Properties();
         try (InputStream is = getClass().getResourceAsStream("/plugin.properties")) {
             props.load(is);
         } catch (IOException e) {
-            throw new MavenExecutionException("Can't load plugin.properties",
-                    session.getCurrentProject().getFile());
+            throw new MavenExecutionException("Can't load plugin.properties", session.getCurrentProject().getFile());
         }
 
-        pluginGroupId = props.getProperty("plugin.groupId");
-        pluginArtifactId = props.getProperty("plugin.artifactId");
-
+        this.pluginGroupId = props.getProperty("plugin.groupId");
+        this.pluginArtifactId = props.getProperty("plugin.artifactId");
     }
 
-    private List<RemoteRepository> configureRepositories(MavenSession session) throws MavenExecutionException {
+    private void configureRepositories() throws MavenExecutionException {
         final String repositoryNames = System.getProperty(VBE_REPOSITORY_NAMES);
         final Set<String> names = new HashSet<>();
         logger.info("[VBE] Repository names used for updates:");
-        if(repositoryNames !=null && repositoryNames.length() > 0) {
-            for(String s:repositoryNames.split(",")) {
-                logger.info("  - {}",s);
+        if (repositoryNames != null && repositoryNames.length() > 0) {
+            for (String s : repositoryNames.split(",")) {
+                logger.info("  - {}", s);
                 names.add(s.trim());
             }
         }
-        
+
         final List<RemoteRepository> repositories = new ArrayList<>();
 
         logger.info("[VBE] Repositories present in reactor:");
@@ -465,7 +396,103 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             logger.info("  - {}: {}", r.getId(), r.getUrl());
         }
 
-        return repositories;
+        this.repositories = repositories;
     }
 
+    private void configureChannels() {
+        final String channelList = System.getProperty(VBE_CHANNELS);
+        final List<Channel> channels = new LinkedList<>();
+        if (channelList != null && channelList.length() > 0) {
+
+            for (String urlString : Arrays.asList(channelList.split(","))) {
+                try {
+                    final URL url = new URL(urlString);
+                    final Channel c = ChannelMapper.from(url);
+                    // TODO: vet repositories?
+                    channels.add(c);
+                } catch (MalformedURLException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
+            }
+        }
+        final MavenVersionsResolver.Factory factory = new MavenVersionsResolver.Factory() {
+            // TODO: add acceptors?
+            @Override
+            public MavenVersionsResolver create() {
+                return new MavenVersionsResolver() {
+
+                    @Override
+                    public Set<String> getAllVersions(String groupId, String artifactId, String extension, String classifier) {
+                        requireNonNull(groupId);
+                        requireNonNull(artifactId);
+                        Artifact artifact = new DefaultArtifact(groupId, artifactId, classifier, extension, "[0,)");
+                        VersionRangeRequest versionRangeRequest = new VersionRangeRequest();
+                        versionRangeRequest.setArtifact(artifact);
+                        versionRangeRequest.setRepositories(repositories);
+
+                        try {
+                            VersionRangeResult versionRangeResult = repo.resolveVersionRange(session.getRepositorySession(),
+                                    versionRangeRequest);
+                            Set<String> versions = versionRangeResult.getVersions().stream().map(Version::toString)
+                                    .collect(Collectors.toSet());
+                            logger.trace("All versions in the repositories: %s", versions);
+                            return versions;
+                        } catch (VersionRangeResolutionException e) {
+                            return emptySet();
+                        }
+                    }
+
+                    @Override
+                    public File resolveLatestVersionFromMavenMetadata(String groupId, String artifactId, String extension,
+                            String classifier) throws UnresolvedMavenArtifactException {
+                        Artifact artifact = new DefaultArtifact(groupId, artifactId, classifier, extension, "[0,)");
+                        VersionRangeRequest versionRangeRequest = new VersionRangeRequest();
+                        versionRangeRequest.setArtifact(artifact);
+                        versionRangeRequest.setRepositories(repositories);
+
+                        try {
+                            VersionRangeResult versionRangeResult = repo.resolveVersionRange(session.getRepositorySession(),
+                                    versionRangeRequest);
+                            if (versionRangeResult.getHighestVersion() == null) {
+                                throw new UnresolvedMavenArtifactException(
+                                        "Artifact " + artifact + " metadata has no highest version");
+                            }
+                            artifact = artifact.setVersion(versionRangeResult.getHighestVersion().toString());
+                        } catch (VersionRangeResolutionException e) {
+                            throw new UnresolvedMavenArtifactException("Unable to resolve artifact versions " + artifact, e);
+                        }
+
+                        ArtifactRequest request = new ArtifactRequest();
+                        request.setArtifact(artifact);
+                        request.setRepositories(repositories);
+                        try {
+                            ArtifactResult result = repo.resolveArtifact(session.getRepositorySession(), request);
+                            return result.getArtifact().getFile();
+                        } catch (ArtifactResolutionException e) {
+                            throw new UnresolvedMavenArtifactException("Unable to resolve artifact " + artifact, e);
+                        }
+                    }
+
+                    @Override
+                    public File resolveArtifact(String groupId, String artifactId, String extension_aka_type, String classifier,
+                            String version) throws UnresolvedMavenArtifactException {
+                        Artifact artifact = new DefaultArtifact(groupId, artifactId, classifier, extension_aka_type, version);
+                        ArtifactRequest request = new ArtifactRequest();
+                        request.setArtifact(artifact);
+                        request.setRepositories(repositories);
+                        try {
+                            ArtifactResult result = repo.resolveArtifact(session.getRepositorySession(), request);
+                            return result.getArtifact().getFile();
+                        } catch (ArtifactResolutionException e) {
+                            throw new UnresolvedMavenArtifactException("Unable to resolve artifact " + artifact, e);
+                        }
+                    }
+
+                };
+            }
+
+        };
+        this.channelSession = new ChannelSession(channels, factory);
+    }
 }

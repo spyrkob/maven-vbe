@@ -46,18 +46,17 @@ public class VBEVersionUpdate {
     private final String artifactId;
     private final String groupId;
     private String oldVersion;
-    private List<VBEVersionUpdate> violations = new ArrayList<>();
-    private RemoteRepository repository;
-    public VBEVersionUpdate(MetadataResult metadataResult, String v) {
-        this.version = v;
-        this.artifactId = metadataResult.getRequest().getMetadata().getArtifactId();
-        this.groupId = metadataResult.getRequest().getMetadata().getGroupId();
-        //possibly local cache?
-        RemoteRepository maybeNull = metadataResult.getRequest().getRepository();
-        this.repositoryUrl = maybeNull != null ? maybeNull.getUrl() : "<NONE>";
-        this.repository = metadataResult.getRequest().getRepository();
+    private final List<VBEVersionUpdate> violations = new ArrayList<>();
+
+    public VBEVersionUpdate(final String groupId, final String artifactId, final String newVersion) {
+        this.version = newVersion;
+        this.artifactId = artifactId;
+        this.groupId = groupId;
+        // possibly local cache?
+        //TODO: add this once available
+        this.repositoryUrl = "<NONE>";
     }
-    
+
     public static final String generateKey(final VBEVersionUpdate entry) {
         return entry.getGroupId() + ":" + entry.getArtifactId();
     }
@@ -66,9 +65,6 @@ public class VBEVersionUpdate {
         return repositoryUrl;
     }
 
-    public RemoteRepository getRepository() {
-        return this.repository;
-    }
     public String getVersion() {
         return version;
     }
@@ -86,7 +82,7 @@ public class VBEVersionUpdate {
     }
 
     public boolean hasViolations() {
-        return this.violations.size()>0;
+        return this.violations.size() > 0;
     }
 
     public void setOldVersion(String version2) {
@@ -100,6 +96,7 @@ public class VBEVersionUpdate {
     public Collection<VBEVersionUpdate> getViolations() {
         return this.violations;
     }
+
     // NOTE: URL ?
     @Override
     public int hashCode() {
