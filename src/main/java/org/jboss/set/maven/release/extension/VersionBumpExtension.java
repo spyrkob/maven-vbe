@@ -228,7 +228,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             MavenArtifact result;
             try {
                 result = this.channelSession.resolveMavenArtifact(dependency.getGroupId(), dependency.getArtifactId(), dependency.getType(),
-                        null, nextVersion.getVersion());
+                        nextVersion.getVersion());
             } catch (UnresolvedMavenArtifactException e) {
                 if(logger.isDebugEnabled()) {
                     logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}:{}", mavenProject.getGroupId(),
@@ -440,37 +440,6 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                             return versions;
                         } catch (VersionRangeResolutionException e) {
                             return emptySet();
-                        }
-                    }
-
-                    @Override
-                    public File resolveLatestVersionFromMavenMetadata(String groupId, String artifactId, String extension,
-                            String classifier) throws UnresolvedMavenArtifactException {
-                        Artifact artifact = new DefaultArtifact(groupId, artifactId, classifier, extension, "[0,)");
-                        VersionRangeRequest versionRangeRequest = new VersionRangeRequest();
-                        versionRangeRequest.setArtifact(artifact);
-                        versionRangeRequest.setRepositories(repositories);
-
-                        try {
-                            VersionRangeResult versionRangeResult = repo.resolveVersionRange(session.getRepositorySession(),
-                                    versionRangeRequest);
-                            if (versionRangeResult.getHighestVersion() == null) {
-                                throw new UnresolvedMavenArtifactException(
-                                        "Artifact " + artifact + " metadata has no highest version");
-                            }
-                            artifact = artifact.setVersion(versionRangeResult.getHighestVersion().toString());
-                        } catch (VersionRangeResolutionException e) {
-                            throw new UnresolvedMavenArtifactException("Unable to resolve artifact versions " + artifact, e);
-                        }
-
-                        ArtifactRequest request = new ArtifactRequest();
-                        request.setArtifact(artifact);
-                        request.setRepositories(repositories);
-                        try {
-                            ArtifactResult result = repo.resolveArtifact(session.getRepositorySession(), request);
-                            return result.getArtifact().getFile();
-                        } catch (ArtifactResolutionException e) {
-                            throw new UnresolvedMavenArtifactException("Unable to resolve artifact " + artifact, e);
                         }
                     }
 
