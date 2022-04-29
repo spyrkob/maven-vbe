@@ -38,20 +38,22 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
  *
  */
 @JsonPropertyOrder({ "groupId", "artifactId", "version", "oldVersion", "repositoryUrl", "violations" })
-@JsonIgnoreProperties("repository")
+@JsonIgnoreProperties({"repository", "type"})
 public class VBEVersionUpdate {
 
     private final String repositoryUrl;
-    private final String version;
+    private String version;
     private final String artifactId;
     private final String groupId;
     private String oldVersion;
+    private final String type;
     private final List<VBEVersionUpdate> violations = new ArrayList<>();
 
-    public VBEVersionUpdate(final String groupId, final String artifactId, final String newVersion) {
+    public VBEVersionUpdate(final String groupId, final String artifactId, final String newVersion, final String type) {
         this.version = newVersion;
         this.artifactId = artifactId;
         this.groupId = groupId;
+        this.type = type;
         // possibly local cache?
         //TODO: add this once available
         this.repositoryUrl = "<NONE>";
@@ -67,6 +69,10 @@ public class VBEVersionUpdate {
 
     public String getVersion() {
         return version;
+    }
+
+    public void setVersion(String version) {
+        this.version = version;
     }
 
     public String getArtifactId() {
@@ -95,6 +101,10 @@ public class VBEVersionUpdate {
 
     public Collection<VBEVersionUpdate> getViolations() {
         return this.violations;
+    }
+
+    public String getType() {
+        return this.type;
     }
 
     // NOTE: URL ?

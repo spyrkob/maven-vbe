@@ -23,6 +23,7 @@ package org.jboss.set.maven.release.extension;
 
 import static java.util.Collections.emptySet;
 import static java.util.Objects.requireNonNull;
+import static org.wildfly.channel.version.VersionMatcher.COMPARATOR;
 
 import java.io.File;
 import java.io.IOException;
@@ -37,12 +38,15 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.apache.maven.AbstractMavenLifecycleParticipant;
@@ -287,8 +291,36 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             final String possibleVersionUpdate = this.channelSession.findLatestMavenArtifactVersion(dependency.getGroupId(),
                     dependency.getArtifactId(), null, null);
             final VBEVersionUpdate possibleUpdate = new VBEVersionUpdate(dependency.getGroupId(), dependency.getArtifactId(),
-                    possibleVersionUpdate);
+                    possibleVersionUpdate, dependency.getType());
             possibleUpdate.setOldVersion(dependency.getVersion());
+
+            //messy hack for now
+            final Pattern pattern = Pattern.compile("\\d*(\\.\\d+)*");
+            final Matcher newVersionMatcher = pattern.matcher(possibleUpdate.getVersion());
+            final Matcher oldVersionMatcher = pattern.matcher(possibleUpdate.getOldVersion());
+            if(!(newVersionMatcher.find() && oldVersionMatcher.find())) {
+                logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
+                        session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
+                        dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
+                        possibleUpdate.getVersion());
+                return;
+            }
+            final String[] newVersionSplit = newVersionMatcher.group().split("\\.");
+            final String[] oldVersionSplit = oldVersionMatcher.group().split("\\.");
+            //https://docs.oracle.com/middleware/1212/core/MAVEN/maven_version.htm#MAVEN8903
+            if(newVersionSplit.length > oldVersionSplit.length) {
+                //looks like new one went far ahead
+                rangeLookup(possibleUpdate, oldVersionSplit);
+            } else if(newVersionSplit.length == oldVersionSplit.length){
+                if(prefixMatch(newVersionSplit, oldVersionSplit)) {
+                    //Do nothing, new version should be fine
+                } else {
+                    rangeLookup(possibleUpdate, oldVersionSplit);
+                }
+            } else {
+                //This technically should not happen? Lets just ignore
+                possibleUpdate.setVersion(possibleUpdate.getOldVersion());
+            }
 
             if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate.getVersion(), possibleUpdate.getOldVersion()) > 0) {
                 logger.info("[VBE] {}:{}, possible update for dependency {}:{} {}->{}",
@@ -317,8 +349,46 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         }
     }
 
+    private boolean prefixMatch(final String[] v1, final String[] v2) {
+        for(int i=0;i<v1.length-1;i++) {
+            if(!v1[i].equals(v2[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+    private String createVersionRangeUpdate(final String[] arr) {
+        String[] copiedArray = Arrays.copyOfRange(arr, 0,arr.length-1);
+        copiedArray[copiedArray.length-1] = Integer.toString(Integer.parseInt(copiedArray[copiedArray.length-1])+1);
+        return String.join(".",copiedArray);
+    }
+
+    private void rangeLookup(final VBEVersionUpdate possibleUpdate, final String[] oldVErsionSplit) {
+        final String lookUpRange = "["+possibleUpdate.getOldVersion()+","+createVersionRangeUpdate(oldVErsionSplit)+")";
+        Artifact artifact = new DefaultArtifact(possibleUpdate.getGroupId(), possibleUpdate.getArtifactId(), null, possibleUpdate.getType(), lookUpRange);
+        VersionRangeRequest versionRangeRequest = new VersionRangeRequest();
+        versionRangeRequest.setArtifact(artifact);
+        versionRangeRequest.setRepositories(repositories);
+
+        try {
+            VersionRangeResult versionRangeResult = repo.resolveVersionRange(session.getRepositorySession(),
+                    versionRangeRequest);
+            Optional<String> thePossibility = versionRangeResult.getVersions().stream().map(Version::toString)
+                    .sorted(COMPARATOR.reversed())
+                    .findFirst();
+            if(thePossibility.isPresent()) {
+                possibleUpdate.setVersion(thePossibility.get());
+            }
+        } catch (VersionRangeResolutionException e) {
+            //Do nothing?
+            if(logger.isDebugEnabled()) {
+                logger.error("[VBE] {}:{}, failed to fetch range for {}:{} -> {}", session.getCurrentProject().getGroupId(),
+                        session.getCurrentProject().getArtifactId(), possibleUpdate.getGroupId(), possibleUpdate.getArtifactId(), e);
+            }
+        }
+    }
+
     private boolean shouldProcess(final Dependency dependency) {
-        // TODO: check if there is Channel defined
         return true;
     }
 
