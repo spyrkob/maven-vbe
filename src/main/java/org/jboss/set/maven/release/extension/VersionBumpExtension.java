@@ -223,7 +223,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
      */
     private void updateDependency(final MavenProject mavenProject, final Dependency dependency, final boolean managed,
             final Consumer<MavenArtifact> mavenProjectVersionUpdater) {
-        resolveDependencyVersionUpdate(dependency, nextVersion -> {
+        resolveDependencyVersionUpdate(mavenProject,dependency, nextVersion -> {
             // NOTE: since default session does not contain repositories that are in channels we have to fetch EVERYTHING
             if (nextVersion == null || nextVersion.getVersion().equals(dependency.getVersion())) {
                 return;
@@ -285,7 +285,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
      * @param dependency
      * @param versionConsumer
      */
-    private void resolveDependencyVersionUpdate(final Dependency dependency, final Consumer<VBEVersionUpdate> versionConsumer) {
+    private void resolveDependencyVersionUpdate(final MavenProject mavenProject, final Dependency dependency, final Consumer<VBEVersionUpdate> versionConsumer) {
         try {
             // TODO: discriminate major/minor/micro here?
             final String possibleVersionUpdate = this.channelSession.findLatestMavenArtifactVersion(dependency.getGroupId(),
@@ -300,7 +300,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             final Matcher oldVersionMatcher = pattern.matcher(possibleUpdate.getOldVersion());
             if(!(newVersionMatcher.find() && oldVersionMatcher.find())) {
                 logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
-                        session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
+                        mavenProject.getGroupId(), mavenProject.getArtifactId(),
                         dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
                         possibleUpdate.getVersion());
                 return;
@@ -324,14 +324,14 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
 
             if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate.getVersion(), possibleUpdate.getOldVersion()) > 0) {
                 logger.info("[VBE] {}:{}, possible update for dependency {}:{} {}->{}",
-                        session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
+                        mavenProject.getGroupId(), mavenProject.getArtifactId(),
                         dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
                         possibleUpdate.getVersion());
                 versionConsumer.accept(possibleUpdate);
                 return;
             } else {
                 logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
-                        session.getCurrentProject().getGroupId(), session.getCurrentProject().getArtifactId(),
+                        mavenProject.getGroupId(), mavenProject.getArtifactId(),
                         dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
                         possibleUpdate.getVersion());
                 return;
@@ -339,11 +339,11 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
 
         } catch (Exception e) {
             if(logger.isDebugEnabled()) {
-                logger.error("[VBE] {}:{}, failed to fetch info for {}:{} -> {}", session.getCurrentProject().getGroupId(),
-                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), e);
+                logger.error("[VBE] {}:{}, failed to fetch info for {}:{} -> {}", mavenProject.getGroupId(),
+                        mavenProject.getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), e);
             } else {
-                logger.error("[VBE] {}:{}, failed to fetch info for {}:{}", session.getCurrentProject().getGroupId(),
-                        session.getCurrentProject().getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
+                logger.error("[VBE] {}:{}, failed to fetch info for {}:{}", mavenProject.getGroupId(),
+                        mavenProject.getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
             }
             return;
         }
