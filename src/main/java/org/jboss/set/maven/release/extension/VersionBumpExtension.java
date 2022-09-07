@@ -229,13 +229,13 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 result = this.channelSession.resolveDirectMavenArtifact(dependency.getGroupId(), dependency.getArtifactId(),dependency.getType(), null, nextVersion.getVersion());
             } catch (UnresolvedMavenArtifactException e) {
                 if(logger.isDebugEnabled()) {
-                    logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}:{}", mavenProject.getGroupId(),
-                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(), dependency.getArtifactId(),
-                            nextVersion.getVersion(), e);
+//                    logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}:{}", mavenProject.getGroupId(),
+//                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(), dependency.getArtifactId(),
+//                            nextVersion.getVersion(), e);
                 } else {
-                    logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}", mavenProject.getGroupId(),
-                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(), dependency.getArtifactId(),
-                            nextVersion.getVersion());
+//                    logger.info("[VBE] {}:{}, failed to resolve dependency{} {}:{}", mavenProject.getGroupId(),
+//                            mavenProject.getArtifactId(), managed ? "(M)" : "", dependency.getGroupId(), dependency.getArtifactId(),
+//                            nextVersion.getVersion());
                 }
                 
                 return;
@@ -281,6 +281,9 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
      * @param versionConsumer
      */
     private void resolveDependencyVersionUpdate(final MavenProject mavenProject, final Dependency dependency, final Consumer<VBEVersionUpdate> versionConsumer) {
+        if (mavenProject.getName().equals("WildFly: EE")) {
+            return;
+        }
         try {
             // TODO: discriminate major/minor/micro here?
             final String possibleVersionUpdate = this.channelSession.findLatestMavenArtifactVersion(dependency.getGroupId(),
@@ -308,10 +311,10 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 versionConsumer.accept(possibleUpdate);
                 return;
             } else {
-                logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
-                        mavenProject.getGroupId(), mavenProject.getArtifactId(),
-                        dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
-                        possibleUpdate.getVersion());
+//                logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
+//                        mavenProject.getGroupId(), mavenProject.getArtifactId(),
+//                        dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
+//                        possibleUpdate.getVersion());
                 return;
             }
         } catch (Exception e) {
@@ -319,8 +322,8 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 logger.error("[VBE] {}:{}, failed to fetch info for {}:{} -> {}", mavenProject.getGroupId(),
                         mavenProject.getArtifactId(), dependency.getGroupId(), dependency.getArtifactId(), e);
             } else {
-                logger.error("[VBE] {}:{}, failed to fetch info for {}:{}", mavenProject.getGroupId(),
-                        mavenProject.getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
+//                logger.error("[VBE] {}:{}, failed to fetch info for {}:{}", mavenProject.getGroupId(),
+//                        mavenProject.getArtifactId(), dependency.getGroupId(), dependency.getArtifactId());
             }
             return;
         }
