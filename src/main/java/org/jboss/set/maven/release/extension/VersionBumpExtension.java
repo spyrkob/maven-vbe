@@ -294,30 +294,13 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             final Matcher newVersionMatcher = pattern.matcher(possibleUpdate.getVersion());
             final Matcher oldVersionMatcher = pattern.matcher(possibleUpdate.getOldVersion());
             if(!(newVersionMatcher.find() && oldVersionMatcher.find())) {
-                logger.info("[VBE] {}:{}, no viable version found for update {}:{} {}<->{}",
+                //some artifacts have timestamp versions...
+                logger.info("[VBE] {}:{}, nom major.minor.micro versioning!!! {}:{} {}<->{}",
                         mavenProject.getGroupId(), mavenProject.getArtifactId(),
                         dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
                         possibleUpdate.getVersion());
                 return;
-            }
-            final String[] newVersionSplit = newVersionMatcher.group().split("\\.");
-            final String[] oldVersionSplit = oldVersionMatcher.group().split("\\.");
-            //https://docs.oracle.com/middleware/1212/core/MAVEN/maven_version.htm#MAVEN8903
-            if(newVersionSplit.length > oldVersionSplit.length) {
-                //looks like new one went far ahead
-                rangeLookup(possibleUpdate, oldVersionSplit);
-            } else if(newVersionSplit.length == oldVersionSplit.length){
-                if(prefixMatch(newVersionSplit, oldVersionSplit)) {
-                    //Do nothing, new version should be fine
-                } else {
-                    rangeLookup(possibleUpdate, oldVersionSplit);
-                }
-            } else {
-                //This technically should not happen? Lets just ignore
-                possibleUpdate.setVersion(possibleUpdate.getOldVersion());
-            }
-
-            if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate.getVersion(), possibleUpdate.getOldVersion()) > 0) {
+            } else if (InsaneVersionComparator.INSTANCE.compare(possibleUpdate.getVersion(), possibleUpdate.getOldVersion()) > 0) {
                 logger.info("[VBE] {}:{}, possible update for dependency {}:{} {}->{}",
                         mavenProject.getGroupId(), mavenProject.getArtifactId(),
                         dependency.getGroupId(), dependency.getArtifactId(), possibleUpdate.getOldVersion(),
@@ -331,7 +314,6 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                         possibleUpdate.getVersion());
                 return;
             }
-
         } catch (Exception e) {
             if(logger.isDebugEnabled()) {
                 logger.error("[VBE] {}:{}, failed to fetch info for {}:{} -> {}", mavenProject.getGroupId(),
