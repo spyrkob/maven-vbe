@@ -21,8 +21,6 @@
  */
 package org.jboss.set.maven.release.extension;
 
-import static java.util.Collections.emptySet;
-import static java.util.Objects.requireNonNull;
 import static org.wildfly.channel.version.VersionMatcher.COMPARATOR;
 
 import java.io.File;
@@ -65,9 +63,6 @@ import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.repository.RemoteRepository;
-import org.eclipse.aether.resolution.ArtifactRequest;
-import org.eclipse.aether.resolution.ArtifactResolutionException;
-import org.eclipse.aether.resolution.ArtifactResult;
 import org.eclipse.aether.resolution.VersionRangeRequest;
 import org.eclipse.aether.resolution.VersionRangeResolutionException;
 import org.eclipse.aether.resolution.VersionRangeResult;
@@ -80,7 +75,7 @@ import org.wildfly.channel.ChannelMapper;
 import org.wildfly.channel.ChannelSession;
 import org.wildfly.channel.MavenArtifact;
 import org.wildfly.channel.UnresolvedMavenArtifactException;
-import org.wildfly.channel.spi.MavenVersionsResolver;
+import org.wildfly.channel.maven.VersionResolverFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
@@ -289,7 +284,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
         try {
             // TODO: discriminate major/minor/micro here?
             final String possibleVersionUpdate = this.channelSession.findLatestMavenArtifactVersion(dependency.getGroupId(),
-                    dependency.getArtifactId(), null, null);
+                    dependency.getArtifactId(), null, null, null);
             final VBEVersionUpdate possibleUpdate = new VBEVersionUpdate(dependency.getGroupId(), dependency.getArtifactId(),
                     possibleVersionUpdate, dependency.getType());
             possibleUpdate.setOldVersion(dependency.getVersion());
@@ -485,52 +480,7 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
                 }
             }
         }
-        final MavenVersionsResolver.Factory factory = new MavenVersionsResolver.Factory() {
-            // TODO: add acceptors?
-            @Override
-            public MavenVersionsResolver create() {
-                return new MavenVersionsResolver() {
-
-                    @Override
-                    public Set<String> getAllVersions(String groupId, String artifactId, String extension, String classifier) {
-                        requireNonNull(groupId);
-                        requireNonNull(artifactId);
-                        Artifact artifact = new DefaultArtifact(groupId, artifactId, classifier, extension, "[0,)");
-                        VersionRangeRequest versionRangeRequest = new VersionRangeRequest();
-                        versionRangeRequest.setArtifact(artifact);
-                        versionRangeRequest.setRepositories(repositories);
-
-                        try {
-                            VersionRangeResult versionRangeResult = repo.resolveVersionRange(session.getRepositorySession(),
-                                    versionRangeRequest);
-                            Set<String> versions = versionRangeResult.getVersions().stream().map(Version::toString)
-                                    .collect(Collectors.toSet());
-                            logger.trace("All versions in the repositories: %s", versions);
-                            return versions;
-                        } catch (VersionRangeResolutionException e) {
-                            return emptySet();
-                        }
-                    }
-
-                    @Override
-                    public File resolveArtifact(String groupId, String artifactId, String extension_aka_type, String classifier,
-                            String version) throws UnresolvedMavenArtifactException {
-                        Artifact artifact = new DefaultArtifact(groupId, artifactId, classifier, extension_aka_type, version);
-                        ArtifactRequest request = new ArtifactRequest();
-                        request.setArtifact(artifact);
-                        request.setRepositories(repositories);
-                        try {
-                            ArtifactResult result = repo.resolveArtifact(session.getRepositorySession(), request);
-                            return result.getArtifact().getFile();
-                        } catch (ArtifactResolutionException e) {
-                            throw new UnresolvedMavenArtifactException("Unable to resolve artifact " + artifact, e);
-                        }
-                    }
-
-                };
-            }
-
-        };
+        final VersionResolverFactory factory = new VersionResolverFactory(repo, session.getRepositorySession(), repositories);
         this.channelSession = new ChannelSession(channels, factory);
     }
 }
