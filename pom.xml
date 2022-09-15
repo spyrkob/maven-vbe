@@ -24,6 +24,7 @@
 		<version.channel>1.0.0.Beta2</version.channel>
 		<version.json.schema.validators>1.0.68</version.json.schema.validators>
 		<version.apache.commons.lang>3.7</version.apache.commons.lang>
+		<pme.version>4.7</pme.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -100,6 +101,40 @@
             <artifactId>commons-lang3</artifactId>
             <version>${version.apache.commons.lang}</version>
         </dependency>
+
+		<dependency>
+			<groupId>org.commonjava.maven.ext</groupId>
+			<artifactId>pom-manipulation-common</artifactId>
+			<version>${pme.version}</version>
+			<exclusions>
+				<exclusion>
+					<groupId>com.fasterxml.jackson.core</groupId>
+					<artifactId>jackson-core</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+		<dependency>
+			<groupId>org.commonjava.maven.ext</groupId>
+			<artifactId>pom-manipulation-core</artifactId>
+			<version>${pme.version}</version>
+			<exclusions>
+				<exclusion>
+					<groupId>com.fasterxml.jackson.core</groupId>
+					<artifactId>jackson-core</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+		<dependency>
+			<groupId>org.commonjava.maven.ext</groupId>
+			<artifactId>pom-manipulation-io</artifactId>
+			<version>${pme.version}</version>
+			<exclusions>
+				<exclusion>
+					<groupId>com.fasterxml.jackson.core</groupId>
+					<artifactId>jackson-core</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
 	</dependencies>
 	<build>
 		<resources>
@@ -124,6 +159,46 @@
 						<goals>
 							<goal>generate-metadata</goal>
 						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<goals>
+							<goal>copy-dependencies</goal>
+						</goals>
+						<configuration>
+							<includeGroupIds>org.commonjava.maven.ext</includeGroupIds>
+						</configuration>
+					</execution>
+				</executions>
+
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-assembly-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>assemble</id>
+						<phase>package</phase>
+						<goals>
+							<goal>single</goal>
+						</goals>
+						<configuration>
+							<descriptors>
+								<descriptor>assembly.xml</descriptor>
+							</descriptors>
+							<recompressZippedFiles>true</recompressZippedFiles>
+							<finalName>${project.build.finalName}</finalName>
+							<appendAssemblyId>false</appendAssemblyId>
+							<outputDirectory>${project.build.directory}</outputDirectory>
+							<workDirectory>${project.build.directory}/assembly/work</workDirectory>
+							<tarLongFileMode>posix</tarLongFileMode>
+						</configuration>
 					</execution>
 				</executions>
 			</plugin>

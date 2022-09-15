@@ -32,6 +32,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
@@ -59,6 +61,11 @@ import org.codehaus.plexus.component.annotations.Component;
 import org.codehaus.plexus.component.annotations.Requirement;
 import org.codehaus.plexus.configuration.xml.XmlPlexusConfiguration;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
+import org.commonjava.maven.atlas.ident.ref.ArtifactRef;
+import org.commonjava.maven.ext.common.ManipulationException;
+import org.commonjava.maven.ext.common.model.Project;
+import org.commonjava.maven.ext.core.ManipulationSession;
+import org.commonjava.maven.ext.io.PomIO;
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
@@ -79,6 +86,8 @@ import org.wildfly.channel.maven.VersionResolverFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+
+import javax.inject.Inject;
 
 @Component(role = AbstractMavenLifecycleParticipant.class, hint = "mailman")
 public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
@@ -107,6 +116,14 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
     // Report part
     private Map<String, ProjectReportEntry> reportMaterial = new TreeMap<>(Comparator.comparing(String::toString));
 
+    @Inject
+    PomIO pomIo;
+
+    @Inject
+    ManipulationSession manipulationSession;
+
+    private Set<String> legacyVersions = new HashSet<>();
+
     @Override
     public void afterSessionStart(MavenSession session) throws MavenExecutionException {
         super.afterSessionStart(session);
@@ -133,6 +150,9 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             for (MavenProject mavenProject : session.getAllProjects()) {
                 // TODO: debug and check if this will cover dep/parent projects
                 // TODO: determine if we need to update every project?
+                legacyVersions = new HashSet<>();
+                parseProjectFile(mavenProject);
+
                 logger.info("[VBE][PROCESSING]   Project {}:{}", mavenProject.getGroupId(), mavenProject.getArtifactId());
                 if (mavenProject.getDependencyManagement() != null) {
                     processProject(mavenProject);
@@ -145,6 +165,27 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
 
         logger.info("\n\n========== Red Hat Channel Version Extension Finished in " + (System.currentTimeMillis() - ts)
                 + "ms ==========\n");
+    }
+
+    private void parseProjectFile(MavenProject mavenProject) {
+        try {
+            final List<Project> projects = pomIo.parseProject(mavenProject.getFile());
+            for (Project project : projects) {
+                final Map<ArtifactRef, Dependency> resolvedDependencies = project.getAllResolvedDependencies(manipulationSession);
+                final Map<ArtifactRef, Dependency> resolvedManagedDependencies = project.getResolvedManagedDependencies(manipulationSession);
+
+                for (ArtifactRef artifactRef : resolvedManagedDependencies.keySet()) {
+                    if (artifactRef.getVersionString().startsWith("${legacy")) {
+                        String key = artifactRef.getGroupId() + ":" + artifactRef.getArtifactId();
+                        legacyVersions.add(key);
+                    }
+                }
+
+                System.out.println("hellp");
+            }
+        } catch (ManipulationException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void report() {
@@ -291,6 +332,10 @@ public class VersionBumpExtension extends AbstractMavenLifecycleParticipant {
             final VBEVersionUpdate possibleUpdate = new VBEVersionUpdate(dependency.getGroupId(), dependency.getArtifactId(),
                     possibleVersionUpdate, dependency.getType());
             possibleUpdate.setOldVersion(dependency.getVersion());
+
+            if (legacyVersions.contains(possibleUpdate.getGroupId() + ":" + possibleUpdate.getArtifactId())) {
+                return;
+            }
 
             //messy hack for now
             final Pattern pattern = Pattern.compile("\\d*(\\.\\d+)*");
